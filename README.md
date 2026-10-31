@@ -8,11 +8,11 @@
   粘贴任意文件夹或单张图片路径，逐张放大，结果存到 `<原目录>/SeedVR2/`，保留原文件名并加后缀；已放大的自动跳过，可断点续跑。
 
 ## 安装
-ComfyUI Manager → Install via Git URL，填本仓库地址；或手动：
+ComfyUI Manager → Install via Git URL，填 `https://github.com/steamwood/ComfyUI-Goudan-AutoQueue.git`；或手动：
 
 ```
 cd ComfyUI/custom_nodes
-git clone <本仓库地址>
+git clone https://github.com/steamwood/ComfyUI-Goudan-AutoQueue.git
 ```
 
 重启 ComfyUI。无额外依赖。示例工作流在 `example_workflows/`。
