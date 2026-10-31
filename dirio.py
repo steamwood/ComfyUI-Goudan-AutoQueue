@@ -88,7 +88,7 @@ class SeedVR2DirLoad:
             if len(todo) > 1:
                 copies = [make_copy(prompt, extra_pnginfo, k, unique_id, {"自动排队": False}) for k in range(1, len(todo))]
                 queue_copies(copies, extra_pnginfo, "SeedVR2 目录读写", fp, prompt)
-                print(f"[SeedVR2 目录读写] 还剩 {len(todo)} 张，正在把后面 {len(todo) - 1} 次排进队列（逐张处理）")
+                print(f"[SeedVR2 目录读写] 还剩 {len(todo)} 张，已把后面 {len(todo) - 1} 次排进队列（逐张处理）")
         f = todo[0]
         img = ImageOps.exif_transpose(Image.open(f))
         if img.mode == "I":

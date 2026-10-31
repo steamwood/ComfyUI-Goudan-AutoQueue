@@ -15,3 +15,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PromptCycleAutoQueue": "提示词循环（自动计条数 + 自动排队）",
     "PromptCycleFilenames": "文件名/文件夹（自动）",
 }
+WEB_DIRECTORY = "./web"
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

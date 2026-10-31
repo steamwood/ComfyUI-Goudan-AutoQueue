@@ -1,10 +1,14 @@
 """自动排队：在第一次运行时，把剩下的运行次数自己排进 ComfyUI 队列。"""
+import asyncio
 import copy
 import hashlib
+import inspect
 import json
 import random
 import ssl
 import threading
+import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -211,10 +215,132 @@ def _running_number(prompt):
         return None
 
 
-def queue_copies(prompts, extra_pnginfo, tag, fp=None, prompt=None):
+QUEUED_EVENT = "goudan-autoqueue.queued"
+UI_QUEUE_LIMIT = 200  # 新版前端队列面板只取最新的 200 个排队任务来显示（多出来的照常执行，只是看不到）
+
+
+def _queue_item_len(srv):
+    """这个版本 ComfyUI 队列里每一项有几个字段（新版 6 个：多了 sensitive；老版 5 个）。"""
+    running, queued = (getattr(srv.prompt_queue, "get_current_queue_volatile", None) or srv.prompt_queue.get_current_queue)()
+    for item in list(running) + list(queued):
+        if len(item) in (5, 6):
+            return len(item)
+    return None
+
+
+def _validate(srv, prompt_id, p):
+    """和 /prompt 一样校验一份副本（兼容新旧版本的 validate_prompt 参数和同步/异步写法）。"""
+    import execution
+    fn = execution.validate_prompt
+    args = []
+    for name in inspect.signature(fn).parameters:
+        if name == "prompt_id":
+            args.append(prompt_id)
+        elif name == "prompt":
+            args.append(p)
+        else:
+            args.append(None)
+    res = fn(*args)
+    if inspect.isawaitable(res):
+        res = asyncio.run_coroutine_threadsafe(res, srv.loop).result(timeout=120)
+    return res
+
+
+def _queue_direct(srv, item_len, prompts, extra, numbers, tag):
+    """不走 HTTP，直接按 /prompt 的流程（on_prompt 处理 → 校验 → 入队）把副本放进队列。返回 (成功数, 失败数)。"""
+    import server as server_mod
+    ok = 0
+    bad = 0
+    for p, number in zip(prompts, numbers):
+        json_data = {"prompt": p, "extra_data": {"extra_pnginfo": extra}, "number": number}
+        json_data = srv.trigger_on_prompt(json_data)
+        p = json_data["prompt"]
+        replacer = getattr(srv, "node_replace_manager", None)
+        if replacer is not None and hasattr(replacer, "apply_replacements"):
+            replacer.apply_replacements(p)
+        prompt_id = str(uuid.uuid4())
+        valid = _validate(srv, prompt_id, p)
+        if not valid[0]:
+            bad += 1
+            if bad <= 3:
+                print(f"[{tag}] 副本校验没通过，跳过这一个：{valid[1]} {valid[3]}")
+            continue
+        extra_data = dict(json_data.get("extra_data") or {})
+        extra_data.pop("workflow_metadata", None)
+        meta_fn = getattr(server_mod, "workflow_metadata_from_prompt", None)
+        if meta_fn is not None:
+            meta = meta_fn(extra_data)
+            if meta is not None:
+                extra_data["workflow_metadata"] = meta
+        extra_data["create_time"] = int(time.time() * 1000)
+        item = (number, prompt_id, p, extra_data, valid[2])
+        if item_len == 6:
+            item = item + ({},)
+        srv.prompt_queue.put(item)
+        ok += 1
+    return ok, bad
+
+
+def _post_one(url, ctx, data, tag):
+    """HTTP 备用方式：一个副本最多试 3 次。"""
+    body = json.dumps(data).encode("utf-8")
+    err = None
+    for attempt in range(3):
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req, timeout=60, context=ctx).read()
+            return True
+        except urllib.error.HTTPError as e:
+            err = e
+            if e.code == 400:
+                break  # 校验没通过，重试也一样
+        except Exception as e:
+            err = e
+        time.sleep(1 + attempt)
+    print(f"[{tag}] 有一个副本没排进去：{err}")
+    return False
+
+
+def _queue_http(prompts, extra, numbers, tag):
     url = _server_url()
-    base = _running_number(prompt) if prompt is not None else None
     ctx = ssl._create_unverified_context() if url.startswith("https") else None
+    ok = 0
+    bad = 0
+    for p, number in zip(prompts, numbers):
+        data = {"prompt": p, "extra_data": {"extra_pnginfo": extra}}
+        if number is not None:
+            data["number"] = number
+        if _post_one(url, ctx, data, tag):
+            ok += 1
+        else:
+            bad += 1
+    return ok, bad
+
+
+def _notify(srv, tag, ok, bad):
+    """在界面右上角弹提示：排了多少个；超过 200 个时说明队列面板只显示 200 个、其余不会丢。"""
+    try:
+        running, queued = (getattr(srv.prompt_queue, "get_current_queue_volatile", None) or srv.prompt_queue.get_current_queue)()
+        waiting = len(queued)
+        print(f"[{tag}] 已自动排队 {ok} 次（现在队列里共 {waiting} 个等待中）" + (f"，{bad} 个没排进去" if bad else ""))
+        if waiting > UI_QUEUE_LIMIT:
+            print(f"[{tag}] 提示：ComfyUI 的队列面板最多只显示 {UI_QUEUE_LIMIT} 个排队任务，其余的都在队列里，会照常按顺序执行。")
+        srv.send_sync(QUEUED_EVENT, {"tag": tag, "queued": ok, "failed": bad, "waiting": waiting, "ui_limit": UI_QUEUE_LIMIT})
+    except Exception as e:
+        print(f"[{tag}] 已自动排队 {ok} 次（{e}）")
+
+
+def queue_copies(prompts, extra_pnginfo, tag, fp=None, prompt=None):
+    """把副本排进队列：编号 = 当前任务编号 + 小数，整套连续排在当前任务后面。
+    排完才返回（同步），所以不会有“还没排完就开始跑下一个”的问题，数量也没有上限。"""
+    from server import PromptServer
+    srv = PromptServer.instance
+    base = _running_number(prompt) if prompt is not None else None
+    total = len(prompts)
+    if base is not None:
+        numbers = [base + i / (total + 1) for i in range(1, total + 1)]
+    else:
+        numbers = [None] * total
     extra = dict(extra_pnginfo or {})
     extra.pop(DUP_KEY, None)
     if fp:
@@ -222,33 +348,40 @@ def queue_copies(prompts, extra_pnginfo, tag, fp=None, prompt=None):
         extra[COPY_KEY] = True
         with _posting_lock:
             _posting[fp] = _posting.get(fp, 0) + 1
-
-    def run():
-        ok = 0
+    t0 = time.time()
+    ok = 0
+    bad = 0
+    try:
+        item_len = None
         try:
-            for i, p in enumerate(prompts, 1):
-                data = {"prompt": p, "extra_data": {"extra_pnginfo": extra}}
-                if base is not None:
-                    data["number"] = base + i / (len(prompts) + 1)
-                body = json.dumps(data).encode("utf-8")
-                req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-                try:
-                    urllib.request.urlopen(req, timeout=60, context=ctx).read()
-                    ok += 1
-                except Exception as e:
-                    print(f"[{tag}] 自动排队失败（已排 {ok} 个）：{e}")
-                    return
-            print(f"[{tag}] 已自动排队 {ok} 次")
-        finally:
-            if fp:
-                with _posting_lock:
-                    _posting[fp] -= 1
-                    if not _posting[fp]:
-                        del _posting[fp]
-
-    t = threading.Thread(target=run, daemon=True)
-    t.start()
-    t.join(120)  # 等副本都进了队列再往下跑，免得后面点的任务先开始、两套交错
+            item_len = _queue_item_len(srv)
+        except Exception:
+            pass
+        direct = item_len is not None and getattr(srv, "loop", None) is not None
+        if direct and None in numbers:
+            start = srv.number
+            srv.number += total
+            numbers = [start + i for i in range(total)]
+        if direct:
+            try:
+                ok, bad = _queue_direct(srv, item_len, prompts, extra, numbers, tag)
+            except Exception as e:
+                print(f"[{tag}] 直接入队出错，改用 HTTP 继续排剩下的：{e}")
+                direct = False
+        if not direct:
+            done = ok + bad
+            more_ok, more_bad = _queue_http(prompts[done:], extra, numbers[done:], tag)
+            ok += more_ok
+            bad += more_bad
+    finally:
+        if fp:
+            with _posting_lock:
+                _posting[fp] -= 1
+                if not _posting[fp]:
+                    del _posting[fp]
+    print(f"[{tag}] 排队用时 {time.time() - t0:.2f} 秒")
+    _notify(srv, tag, ok, bad)
+    return ok
 
 
 def count_items(strings):
@@ -310,6 +443,6 @@ class PromptCycleAutoQueue:
                 return blocked_outputs(2)
             copies = [make_copy(prompt, extra_pnginfo, k, unique_id, {"序号": k, "自动排队": False}, force_random=每张随机种子) for k in range(1, total)]
             queue_copies(copies, extra_pnginfo, "提示词循环", fp, prompt)
-            print(f"[提示词循环] 共 {n} 条 × {轮数} 轮 = {total} 次，正在把剩下 {total - 1} 次排进队列")
+            print(f"[提示词循环] 共 {n} 条 × {轮数} 轮 = {total} 次，已把剩下 {total - 1} 次排进队列")
         print(f"[提示词循环] 第 {序号 + 1}/{total} 次：第 {序号 % n + 1} 条，第 {序号 // n + 1} 轮")
         return (序号, n)
