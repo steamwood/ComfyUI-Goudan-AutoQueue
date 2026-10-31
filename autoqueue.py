@@ -8,6 +8,8 @@ import threading
 import urllib.request
 import uuid
 
+from .filenames import resolve_prompt_dates
+
 SEED_KEYS = ("seed", "noise_seed")
 
 
@@ -154,6 +156,8 @@ def _on_prompt(json_data):
         prompt = json_data.get("prompt")
         if not isinstance(prompt, dict):
             return json_data
+        # 先定下日期（必须在算指纹之前，原始任务执行时重算的指纹才能对上）
+        resolve_prompt_dates(prompt)
         hit = next(((nid, n["class_type"]) for nid, n in prompt.items() if isinstance(n, dict)
                     and n.get("class_type") in AUTO_NODES and n.get("inputs", {}).get("自动排队") is True), None)
         if not hit:
