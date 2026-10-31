@@ -1,0 +1,1025 @@
+{
+ "id": "1ac7e351-da90-4171-8081-3852d4a5d955",
+ "revision": 0,
+ "last_node_id": 12,
+ "last_link_id": 18,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "SeedVR2DirLoad",
+   "size": [
+    460,
+    140
+   ],
+   "flags": {},
+   "order": 0,
+   "inputs": [
+    {
+     "localized_name": "路径",
+     "name": "路径",
+     "type": "STRING",
+     "widget": {
+      "name": "路径"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "后缀",
+     "name": "后缀",
+     "type": "STRING",
+     "widget": {
+      "name": "后缀"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "自动排队",
+     "name": "自动排队",
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "自动排队"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "图像",
+     "name": "图像",
+     "type": "IMAGE",
+     "links": [
+      1
+     ]
+    },
+    {
+     "localized_name": "文件名",
+     "name": "文件名",
+     "type": "STRING",
+     "links": [
+      16
+     ]
+    },
+    {
+     "localized_name": "输出目录",
+     "name": "输出目录",
+     "type": "STRING",
+     "links": [
+      17
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SeedVR2DirLoad"
+   },
+   "widgets_values": [
+    "",
+    "_SeedVR2",
+    true
+   ],
+   "color": "#232",
+   "bgcolor": "#353",
+   "pos": [
+    0,
+    150
+   ],
+   "mode": 0,
+   "title": "① 粘贴路径后点一次运行：文件夹=逐张自动排队，图片文件=单张"
+  },
+  {
+   "id": 2,
+   "type": "PrimitiveFloat",
+   "pos": [
+    420,
+    420
+   ],
+   "size": [
+    210,
+    58
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "值",
+     "name": "value",
+     "type": "FLOAT",
+     "widget": {
+      "name": "value"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "浮点",
+     "name": "FLOAT",
+     "type": "FLOAT",
+     "links": [
+      2
+     ]
+    }
+   ],
+   "title": "放大倍数（只改这里，比例自动跟随原图）",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.18.1",
+    "Node name for S&R": "PrimitiveFloat",
+    "ue_properties": {
+     "widget_ue_connectable": {},
+     "input_ue_unconnectable": {},
+     "version": "7.7"
+    }
+   },
+   "widgets_values": [
+    2.0
+   ],
+   "widgets_values_named": {
+    "value": 2.0
+   },
+   "color": "#233",
+   "bgcolor": "#355"
+  },
+  {
+   "id": 3,
+   "type": "ResizeImageMaskNode",
+   "pos": [
+    700,
+    200
+   ],
+   "size": [
+    246.1858449533736,
+    106
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "输入",
+     "name": "input",
+     "type": "IMAGE,MASK",
+     "link": 1
+    },
+    {
+     "localized_name": "调整类型",
+     "name": "resize_type",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "widget": {
+      "name": "resize_type"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "multiplier",
+     "name": "resize_type.multiplier",
+     "type": "FLOAT",
+     "widget": {
+      "name": "resize_type.multiplier"
+     },
+     "link": 2
+    },
+    {
+     "localized_name": "缩放方法",
+     "name": "scale_method",
+     "type": "COMBO",
+     "widget": {
+      "name": "scale_method"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "已调整大小",
+     "name": "resized",
+     "type": "IMAGE",
+     "links": [
+      3,
+      15
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.27.0",
+    "Node name for S&R": "ResizeImageMaskNode"
+   },
+   "widgets_values": [
+    "scale by multiplier",
+    8,
+    "lanczos"
+   ],
+   "widgets_values_named": {
+    "resize_type": "scale by multiplier",
+    "resize_type.multiplier": 8,
+    "scale_method": "lanczos"
+   },
+   "title": "按倍数放大（保持原图比例，勿改）"
+  },
+  {
+   "id": 4,
+   "type": "SeedVR2Preprocess",
+   "pos": [
+    1000,
+    200
+   ],
+   "size": [
+    243.79155496412832,
+    26
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "resized_images",
+     "name": "resized_images",
+     "type": "IMAGE",
+     "link": 3
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "links": [
+      4
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.27.0",
+    "Node name for S&R": "SeedVR2Preprocess"
+   }
+  },
+  {
+   "id": 5,
+   "type": "VAELoader",
+   "pos": [
+    700,
+    450
+   ],
+   "size": [
+    516.7970143383191,
+    58
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "vae名称",
+     "name": "vae_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "vae_name"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "VAE",
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      5,
+      13
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.27.0",
+    "Node name for S&R": "VAELoader",
+    "models": [
+     {
+      "name": "seedvr2_ema_vae_fp16.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors",
+      "directory": "vae"
+     }
+    ]
+   },
+   "widgets_values": [
+    "seedvr2_ema_vae_fp16.safetensors"
+   ],
+   "widgets_values_named": {
+    "vae_name": "seedvr2_ema_vae_fp16.safetensors"
+   },
+   "color": "#323",
+   "bgcolor": "#535"
+  },
+  {
+   "id": 6,
+   "type": "UNETLoader",
+   "pos": [
+    700,
+    600
+   ],
+   "size": [
+    513.6883751682428,
+    82
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "showAdvanced": false,
+   "inputs": [
+    {
+     "localized_name": "UNet名称",
+     "name": "unet_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "unet_name"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "数据类型",
+     "name": "weight_dtype",
+     "type": "COMBO",
+     "widget": {
+      "name": "weight_dtype"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "模型",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      6,
+      8
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.27.0",
+    "Node name for S&R": "UNETLoader",
+    "models": [
+     {
+      "name": "seedvr2_7b_int8_convrot.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_7b_int8_convrot.safetensors",
+      "directory": "diffusion_models"
+     }
+    ]
+   },
+   "widgets_values": [
+    "SEEDVR2\\seedvr2_7b_int8_convrot.safetensors",
+    "default"
+   ],
+   "widgets_values_named": {
+    "unet_name": "SEEDVR2\\seedvr2_7b_int8_convrot.safetensors",
+    "weight_dtype": "default"
+   },
+   "color": "#323",
+   "bgcolor": "#535"
+  },
+  {
+   "id": 7,
+   "type": "VAEEncodeTiled",
+   "pos": [
+    1250,
+    200
+   ],
+   "size": [
+    233.1318750804603,
+    150
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "showAdvanced": true,
+   "inputs": [
+    {
+     "localized_name": "像素",
+     "name": "pixels",
+     "type": "IMAGE",
+     "link": 4
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 5
+    },
+    {
+     "localized_name": "分块尺寸",
+     "name": "tile_size",
+     "type": "INT",
+     "widget": {
+      "name": "tile_size"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "重叠",
+     "name": "overlap",
+     "type": "INT",
+     "widget": {
+      "name": "overlap"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "时间尺寸",
+     "name": "temporal_size",
+     "type": "INT",
+     "widget": {
+      "name": "temporal_size"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "时间重叠",
+     "name": "temporal_overlap",
+     "type": "INT",
+     "widget": {
+      "name": "temporal_overlap"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "Latent",
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      7,
+      11
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.27.0",
+    "Node name for S&R": "VAEEncodeTiled"
+   },
+   "widgets_values": [
+    512,
+    128,
+    4096,
+    8
+   ],
+   "widgets_values_named": {
+    "tile_size": 512,
+    "overlap": 128,
+    "temporal_size": 4096,
+    "temporal_overlap": 8
+   }
+  },
+  {
+   "id": 8,
+   "type": "SeedVR2Conditioning",
+   "pos": [
+    1250,
+    450
+   ],
+   "size": [
+    241.59451820700394,
+    46
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 6
+    },
+    {
+     "label": "latent",
+     "localized_name": "vae_conditioning",
+     "name": "vae_conditioning",
+     "type": "LATENT",
+     "link": 7
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "positive",
+     "name": "positive",
+     "type": "CONDITIONING",
+     "links": [
+      9
+     ]
+    },
+    {
+     "localized_name": "negative",
+     "name": "negative",
+     "type": "CONDITIONING",
+     "links": [
+      10
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.27.0",
+    "Node name for S&R": "SeedVR2Conditioning"
+   }
+  },
+  {
+   "id": 9,
+   "type": "KSampler",
+   "pos": [
+    1550,
+    200
+   ],
+   "size": [
+    240.37874301072793,
+    262
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "模型",
+     "name": "model",
+     "type": "MODEL",
+     "link": 8
+    },
+    {
+     "localized_name": "正面条件",
+     "name": "positive",
+     "type": "CONDITIONING",
+     "link": 9
+    },
+    {
+     "localized_name": "负面条件",
+     "name": "negative",
+     "type": "CONDITIONING",
+     "link": 10
+    },
+    {
+     "localized_name": "Latent图像",
+     "name": "latent_image",
+     "type": "LATENT",
+     "link": 11
+    },
+    {
+     "localized_name": "种子",
+     "name": "seed",
+     "type": "INT",
+     "widget": {
+      "name": "seed"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "步数",
+     "name": "steps",
+     "type": "INT",
+     "widget": {
+      "name": "steps"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "cfg",
+     "name": "cfg",
+     "type": "FLOAT",
+     "widget": {
+      "name": "cfg"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "采样器名称",
+     "name": "sampler_name",
+     "type": "COMBO",
+     "widget": {
+      "name": "sampler_name"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "调度器",
+     "name": "scheduler",
+     "type": "COMBO",
+     "widget": {
+      "name": "scheduler"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "降噪",
+     "name": "denoise",
+     "type": "FLOAT",
+     "widget": {
+      "name": "denoise"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "Latent",
+     "name": "LATENT",
+     "type": "LATENT",
+     "links": [
+      12
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.27.0",
+    "Node name for S&R": "KSampler"
+   },
+   "widgets_values": [
+    21068150265002,
+    "randomize",
+    1,
+    1,
+    "euler",
+    "simple",
+    1
+   ],
+   "widgets_values_named": {
+    "seed": 21068150265002,
+    "control_after_generate": "randomize",
+    "steps": 1,
+    "cfg": 1,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "denoise": 1
+   }
+  },
+  {
+   "id": 10,
+   "type": "VAEDecodeTiled",
+   "pos": [
+    1850,
+    200
+   ],
+   "size": [
+    242.83236209536187,
+    150
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "showAdvanced": true,
+   "inputs": [
+    {
+     "localized_name": "Latent",
+     "name": "samples",
+     "type": "LATENT",
+     "link": 12
+    },
+    {
+     "localized_name": "vae",
+     "name": "vae",
+     "type": "VAE",
+     "link": 13
+    },
+    {
+     "localized_name": "分块尺寸",
+     "name": "tile_size",
+     "type": "INT",
+     "widget": {
+      "name": "tile_size"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "重叠",
+     "name": "overlap",
+     "type": "INT",
+     "widget": {
+      "name": "overlap"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "时间尺寸",
+     "name": "temporal_size",
+     "type": "INT",
+     "widget": {
+      "name": "temporal_size"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "时间重叠",
+     "name": "temporal_overlap",
+     "type": "INT",
+     "widget": {
+      "name": "temporal_overlap"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "图像",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      14
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.27.0",
+    "Node name for S&R": "VAEDecodeTiled"
+   },
+   "widgets_values": [
+    512,
+    128,
+    4096,
+    8
+   ],
+   "widgets_values_named": {
+    "tile_size": 512,
+    "overlap": 128,
+    "temporal_size": 4096,
+    "temporal_overlap": 8
+   }
+  },
+  {
+   "id": 11,
+   "type": "SeedVR2PostProcessing",
+   "pos": [
+    2150,
+    200
+   ],
+   "size": [
+    245.46324017444203,
+    78
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 14
+    },
+    {
+     "localized_name": "original_resized_images",
+     "name": "original_resized_images",
+     "type": "IMAGE",
+     "link": 15
+    },
+    {
+     "localized_name": "color_correction_method",
+     "name": "color_correction_method",
+     "type": "COMBO",
+     "widget": {
+      "name": "color_correction_method"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "links": [
+      18
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.27.0",
+    "Node name for S&R": "SeedVR2PostProcessing"
+   },
+   "widgets_values": [
+    "lab"
+   ],
+   "widgets_values_named": {
+    "color_correction_method": "lab"
+   }
+  },
+  {
+   "id": 12,
+   "type": "SeedVR2DirSave",
+   "size": [
+    420,
+    500
+   ],
+   "flags": {},
+   "order": 11,
+   "inputs": [
+    {
+     "localized_name": "图像",
+     "name": "图像",
+     "type": "IMAGE",
+     "link": 18
+    },
+    {
+     "localized_name": "文件名",
+     "name": "文件名",
+     "type": "STRING",
+     "link": 16
+    },
+    {
+     "localized_name": "输出目录",
+     "name": "输出目录",
+     "type": "STRING",
+     "link": 17
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SeedVR2DirSave"
+   },
+   "widgets_values": [],
+   "pos": [
+    2450,
+    200
+   ],
+   "mode": 0,
+   "title": "保存到 原目录/SeedVR2/"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   3,
+   0,
+   "IMAGE"
+  ],
+  [
+   2,
+   2,
+   0,
+   3,
+   2,
+   "FLOAT"
+  ],
+  [
+   3,
+   3,
+   0,
+   4,
+   0,
+   "IMAGE"
+  ],
+  [
+   4,
+   4,
+   0,
+   7,
+   0,
+   "IMAGE"
+  ],
+  [
+   5,
+   5,
+   0,
+   7,
+   1,
+   "VAE"
+  ],
+  [
+   6,
+   6,
+   0,
+   8,
+   0,
+   "MODEL"
+  ],
+  [
+   7,
+   7,
+   0,
+   8,
+   1,
+   "LATENT"
+  ],
+  [
+   8,
+   6,
+   0,
+   9,
+   0,
+   "MODEL"
+  ],
+  [
+   9,
+   8,
+   0,
+   9,
+   1,
+   "CONDITIONING"
+  ],
+  [
+   10,
+   8,
+   1,
+   9,
+   2,
+   "CONDITIONING"
+  ],
+  [
+   11,
+   7,
+   0,
+   9,
+   3,
+   "LATENT"
+  ],
+  [
+   12,
+   9,
+   0,
+   10,
+   0,
+   "LATENT"
+  ],
+  [
+   13,
+   5,
+   0,
+   10,
+   1,
+   "VAE"
+  ],
+  [
+   14,
+   10,
+   0,
+   11,
+   0,
+   "IMAGE"
+  ],
+  [
+   15,
+   3,
+   0,
+   11,
+   1,
+   "IMAGE"
+  ],
+  [
+   16,
+   1,
+   1,
+   12,
+   1,
+   "STRING"
+  ],
+  [
+   17,
+   1,
+   2,
+   12,
+   2,
+   "STRING"
+  ],
+  [
+   18,
+   11,
+   0,
+   12,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "groups": [
+  {
+   "id": 1,
+   "title": "SeedVR2 独立放大（粘贴路径：单张/批量）",
+   "bounding": [
+    -40,
+    -120,
+    2900,
+    1000
+   ],
+   "color": "#3f789e",
+   "flags": {}
+  }
+ ],
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.6,
+   "offset": [
+    100,
+    200
+   ]
+  },
+  "frontendVersion": "1.51.10"
+ },
+ "version": 0.4
+}

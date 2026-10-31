@@ -1,0 +1,14 @@
+[project]
+name = "comfyui-goudan-autoqueue"
+description = "Prompt cycling with auto prompt count and auto queue; SeedVR2 per-image folder upscaling saved next to the source."
+version = "1.0.0"
+license = { text = "MIT" }
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/steamwood/ComfyUI-Goudan-AutoQueue"
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "Goudan AutoQueue"
+Icon = ""
