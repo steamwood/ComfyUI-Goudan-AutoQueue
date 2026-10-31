@@ -1,5 +1,12 @@
 """自动排队：在第一次运行时，把剩下的运行次数自己排进 ComfyUI 队列。"""
-import copy, hashlib, json, random, ssl, threading, urllib.request, uuid
+import copy
+import hashlib
+import json
+import random
+import ssl
+import threading
+import urllib.request
+import uuid
 
 SEED_KEYS = ("seed", "noise_seed")
 

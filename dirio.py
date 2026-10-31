@@ -1,5 +1,6 @@
 """SeedVR2 目录读写：从任意路径（文件夹或单张图片）逐张读图，放大后存回 <原目录>/SeedVR2/。"""
-import os, hashlib
+import os
+import hashlib
 import numpy as np
 import torch
 from PIL import Image, ImageOps
@@ -124,18 +125,19 @@ class SeedVR2DirSave:
             path = os.path.join(输出目录, stem + ".png")
             n = 1
             while os.path.exists(path):
-                path = os.path.join(输出目录, f"{stem}_{n:03d}.png"); n += 1
+                path = os.path.join(输出目录, f"{stem}_{n:03d}.png")
+                n += 1
             pil.save(path, compress_level=4)
             print(f"[SeedVR2 目录读写] 已保存 {path}")
             try:
                 import folder_paths
-                tmp = folder_paths.get_temp_directory(); os.makedirs(tmp, exist_ok=True)
-                pv = pil.copy(); pv.thumbnail((1024, 1024))
+                tmp = folder_paths.get_temp_directory()
+                os.makedirs(tmp, exist_ok=True)
+                pv = pil.copy()
+                pv.thumbnail((1024, 1024))
                 tname = f"seedvr2_dirio_{os.getpid()}_{abs(hash(path))}.png"
                 pv.save(os.path.join(tmp, tname), compress_level=1)
                 ui.append({"filename": tname, "subfolder": "", "type": "temp"})
             except Exception:
                 pass
         return {"ui": {"images": ui}}
-
-
