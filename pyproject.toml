@@ -9,6 +9,6 @@ dependencies = []
 Repository = "https://github.com/steamwood/ComfyUI-Goudan-AutoQueue"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "steamwood"
 DisplayName = "Goudan AutoQueue"
 Icon = ""
