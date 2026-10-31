@@ -1,5 +1,5 @@
 """自动排队：在第一次运行时，把剩下的运行次数自己排进 ComfyUI 队列。"""
-import copy, json, random, ssl, threading, urllib.request, uuid
+import copy, hashlib, json, random, ssl, threading, urllib.request, uuid
 
 SEED_KEYS = ("seed", "noise_seed")
 
@@ -78,40 +78,148 @@ def make_copy(prompt, extra_pnginfo, k, my_id, overrides, force_random=False):
     return p
 
 
-_posting = {}  # 正在后台往队列里提交副本的节点类型 -> 线程数（副本还没进队列时也要算“已排”）
+FP_KEY = "goudan_autoqueue_fp"  # 写在 extra_pnginfo 里的内容指纹，标记它属于哪一套
+COPY_KEY = "goudan_autoqueue_copy"  # 自动排出来的副本才有
+_posting = {}  # 正在后台提交副本的指纹 -> 线程数（副本还没进队列时也要算“已排”）
 _posting_lock = threading.Lock()
 
 
-def pending_copies(class_type):
-    """队列里已经有本节点排出来的副本（自动排队=False）就返回数量，防止重复点运行/批量次数>1 时又排一整套。"""
+def fingerprint(prompt, extra_pnginfo, my_id, drop_keys):
+    """原始任务的内容指纹：去掉每次点运行都会变的部分（is_changed、本节点的序号/自动排队、随机种子），
+    内容完全一样才算“连点重复”；改了提示词/模型/LoRA/轮数/路径就是新的一套。"""
+    p = copy.deepcopy(prompt)
+    volatile = {nid: keys for nid, (keys, mode) in _seed_rules(extra_pnginfo).items()}
+    for nid, node in p.items():
+        if not isinstance(node, dict):
+            continue
+        node.pop("is_changed", None)
+        inp = node.get("inputs", {})
+        if nid == str(my_id):
+            for k in drop_keys:
+                inp.pop(k, None)
+        keys = ("seed",) if node.get("class_type") == "Seed (rgthree)" else volatile.get(nid, ())
+        for k in keys:
+            if isinstance(inp.get(k), int) and not isinstance(inp.get(k), bool):
+                inp[k] = "*"
+    return hashlib.sha1(json.dumps(p, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+
+
+def pending_copies(fp):
+    """队列里（或正在提交中）还有同一份内容排出来的副本就返回数量；内容不同的另一套、以及还没跑的原始任务都不算。"""
     with _posting_lock:
-        if _posting.get(class_type):
-            return _posting[class_type]
+        if _posting.get(fp):
+            return _posting[fp]
     try:
         from server import PromptServer
-        running, queued = PromptServer.instance.prompt_queue.get_current_queue()
+        running, queued = (getattr(PromptServer.instance.prompt_queue, "get_current_queue_volatile", None) or PromptServer.instance.prompt_queue.get_current_queue)()
         n = 0
         for item in list(queued):
-            p = item[2]
-            if any(isinstance(v, dict) and v.get("class_type") == class_type and v.get("inputs", {}).get("自动排队") is False for v in p.values()):
+            extra = item[3] if len(item) > 3 and isinstance(item[3], dict) else {}
+            pi = extra.get("extra_pnginfo") or {}
+            if pi.get(FP_KEY) == fp and pi.get(COPY_KEY):
                 n += 1
         return n
     except Exception:
         return 0
 
 
-def queue_copies(prompts, extra_pnginfo, tag, class_type=None):
-    url = _server_url()
-    ctx = ssl._create_unverified_context() if url.startswith("https") else None
-    if class_type:
+AUTO_NODES = {"PromptCycleAutoQueue": ("序号", "自动排队"), "SeedVR2DirLoad": ("自动排队",)}
+DUP_KEY = "goudan_autoqueue_dup"
+
+
+def _active_fps():
+    """队列里（正在跑 + 排队中）所有带指纹的任务的指纹。"""
+    from server import PromptServer
+    running, queued = (getattr(PromptServer.instance.prompt_queue, "get_current_queue_volatile", None) or PromptServer.instance.prompt_queue.get_current_queue)()
+    fps = set()
+    for item in list(running) + list(queued):
+        extra = item[3] if len(item) > 3 and isinstance(item[3], dict) else {}
+        fp = (extra.get("extra_pnginfo") or {}).get(FP_KEY)
+        if fp:
+            fps.add(fp)
+    return fps
+
+
+def _on_prompt(json_data):
+    """每次点运行（POST /prompt）时：给原始任务打上内容指纹；如果同样内容的一套还在队列里没跑完，就标记成“重复点击”。
+    这样后点的那次即使排在整套副本后面才轮到，也能认出来是重复的。"""
+    try:
+        prompt = json_data.get("prompt")
+        if not isinstance(prompt, dict):
+            return json_data
+        hit = next(((nid, n["class_type"]) for nid, n in prompt.items() if isinstance(n, dict)
+                    and n.get("class_type") in AUTO_NODES and n.get("inputs", {}).get("自动排队") is True), None)
+        if not hit:
+            return json_data
+        extra = json_data.setdefault("extra_data", {})
+        pi = extra.get("extra_pnginfo")
+        if not isinstance(pi, dict):
+            pi = extra["extra_pnginfo"] = {}
+        fp = fingerprint(prompt, pi, hit[0], AUTO_NODES[hit[1]])
         with _posting_lock:
-            _posting[class_type] = _posting.get(class_type, 0) + 1
+            posting = bool(_posting.get(fp))
+        if posting or fp in _active_fps():
+            pi[DUP_KEY] = True
+        pi[FP_KEY] = fp
+    except Exception as e:
+        print(f"[狗蛋自动排队] 检查重复点击出错（不影响运行）：{e}")
+    return json_data
+
+
+try:
+    from server import PromptServer
+    PromptServer.instance.add_on_prompt_handler(_on_prompt)
+except Exception:
+    pass
+
+
+def is_duplicate(fp, extra_pnginfo):
+    """这次原始运行是不是“重复点击”：点运行那一刻同样内容的一套还没跑完，或者现在队列里还有它的副本。"""
+    if isinstance(extra_pnginfo, dict) and extra_pnginfo.get(DUP_KEY) and extra_pnginfo.get(FP_KEY) == fp:
+        return True
+    return bool(pending_copies(fp))
+
+
+def blocked_outputs(n):
+    """重复点击时让这次运行什么都不做（下游节点全部跳过）。"""
+    try:
+        from comfy_execution.graph_utils import ExecutionBlocker
+    except ImportError:
+        from comfy_execution.graph import ExecutionBlocker
+    return tuple(ExecutionBlocker(None) for _ in range(n))
+
+
+def _running_number(prompt):
+    """当前正在跑的这次任务在队列里的编号（副本用 编号+小数 插在它后面，保证整套连续、不和后面点的任务交错）。"""
+    try:
+        from server import PromptServer
+        running, _ = (getattr(PromptServer.instance.prompt_queue, "get_current_queue_volatile", None) or PromptServer.instance.prompt_queue.get_current_queue)()
+        mine = [it for it in running if it[2] is prompt] or (running if len(running) == 1 else [])
+        return float(mine[0][0]) if mine else None
+    except Exception:
+        return None
+
+
+def queue_copies(prompts, extra_pnginfo, tag, fp=None, prompt=None):
+    url = _server_url()
+    base = _running_number(prompt) if prompt is not None else None
+    ctx = ssl._create_unverified_context() if url.startswith("https") else None
+    extra = dict(extra_pnginfo or {})
+    extra.pop(DUP_KEY, None)
+    if fp:
+        extra[FP_KEY] = fp
+        extra[COPY_KEY] = True
+        with _posting_lock:
+            _posting[fp] = _posting.get(fp, 0) + 1
 
     def run():
         ok = 0
         try:
-            for p in prompts:
-                body = json.dumps({"prompt": p, "extra_data": {"extra_pnginfo": extra_pnginfo}}).encode("utf-8")
+            for i, p in enumerate(prompts, 1):
+                data = {"prompt": p, "extra_data": {"extra_pnginfo": extra}}
+                if base is not None:
+                    data["number"] = base + i / (len(prompts) + 1)
+                body = json.dumps(data).encode("utf-8")
                 req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
                 try:
                     urllib.request.urlopen(req, timeout=60, context=ctx).read()
@@ -121,11 +229,15 @@ def queue_copies(prompts, extra_pnginfo, tag, class_type=None):
                     return
             print(f"[{tag}] 已自动排队 {ok} 次")
         finally:
-            if class_type:
+            if fp:
                 with _posting_lock:
-                    _posting[class_type] -= 1
+                    _posting[fp] -= 1
+                    if not _posting[fp]:
+                        del _posting[fp]
 
-    threading.Thread(target=run, daemon=True).start()
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(120)  # 等副本都进了队列再往下跑，免得后面点的任务先开始、两套交错
 
 
 def count_items(strings):
@@ -179,11 +291,14 @@ class PromptCycleAutoQueue:
     def run(self, 轮数, 自动排队, 序号, 每张随机种子=True, prompt=None, extra_pnginfo=None, unique_id=None):
         n = self._count(prompt, unique_id)
         total = n * 轮数
-        if 自动排队 and 序号 == 0 and total > 1 and prompt and pending_copies("PromptCycleAutoQueue"):
-            print("[提示词循环] 队列里已经有排好的任务，这次不再重复排队（不要连点运行，批量次数保持 1）")
-        elif 自动排队 and 序号 == 0 and total > 1 and prompt:
+        if 自动排队 and 序号 == 0 and total > 1 and prompt:
+            fp = fingerprint(prompt, extra_pnginfo, unique_id, ("序号", "自动排队"))
+            if is_duplicate(fp, extra_pnginfo):
+                print("[提示词循环] 队列里已经有一套内容完全相同的任务（重复点了运行），这次整次跳过，不再出图也不再排队。"
+                      "改过提示词/模型/LoRA/轮数的新任务会正常排在后面。")
+                return blocked_outputs(2)
             copies = [make_copy(prompt, extra_pnginfo, k, unique_id, {"序号": k, "自动排队": False}, force_random=每张随机种子) for k in range(1, total)]
-            queue_copies(copies, extra_pnginfo, "提示词循环", "PromptCycleAutoQueue")
+            queue_copies(copies, extra_pnginfo, "提示词循环", fp, prompt)
             print(f"[提示词循环] 共 {n} 条 × {轮数} 轮 = {total} 次，正在把剩下 {total - 1} 次排进队列")
         print(f"[提示词循环] 第 {序号 + 1}/{total} 次：第 {序号 % n + 1} 条，第 {序号 // n + 1} 轮")
         return (序号, n)

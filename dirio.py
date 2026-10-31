@@ -78,14 +78,16 @@ class SeedVR2DirLoad:
                 return (b, b, b)
             except ImportError:
                 raise RuntimeError(f"全部 {len(files)} 张都已放大完成")
-        from .autoqueue import pending_copies
-        if 自动排队 and not single and len(todo) > 1 and prompt and pending_copies("SeedVR2DirLoad"):
-            print("[SeedVR2 目录读写] 队列里已经有排好的任务，这次不再重复排队")
-        elif 自动排队 and not single and len(todo) > 1 and prompt:
-            from .autoqueue import make_copy, queue_copies
-            copies = [make_copy(prompt, extra_pnginfo, k, unique_id, {"自动排队": False}) for k in range(1, len(todo))]
-            queue_copies(copies, extra_pnginfo, "SeedVR2 目录读写", "SeedVR2DirLoad")
-            print(f"[SeedVR2 目录读写] 还剩 {len(todo)} 张，正在把后面 {len(todo) - 1} 次排进队列（逐张处理）")
+        if 自动排队 and not single and prompt:
+            from .autoqueue import fingerprint, is_duplicate, blocked_outputs, make_copy, queue_copies
+            fp = fingerprint(prompt, extra_pnginfo, unique_id, ("自动排队",))
+            if is_duplicate(fp, extra_pnginfo):
+                print("[SeedVR2 目录读写] 这个文件夹已经有排好的任务在队列里（重复点了运行），这次整次跳过。换了文件夹的新任务会正常排队。")
+                return blocked_outputs(3)
+            if len(todo) > 1:
+                copies = [make_copy(prompt, extra_pnginfo, k, unique_id, {"自动排队": False}) for k in range(1, len(todo))]
+                queue_copies(copies, extra_pnginfo, "SeedVR2 目录读写", fp, prompt)
+                print(f"[SeedVR2 目录读写] 还剩 {len(todo)} 张，正在把后面 {len(todo) - 1} 次排进队列（逐张处理）")
         f = todo[0]
         img = ImageOps.exif_transpose(Image.open(f))
         if img.mode == "I":

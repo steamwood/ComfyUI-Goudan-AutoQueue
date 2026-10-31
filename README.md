@@ -18,5 +18,6 @@ git clone https://github.com/steamwood/ComfyUI-Goudan-AutoQueue.git
 重启 ComfyUI。无额外依赖。示例工作流在 `example_workflows/`。
 
 ## 注意
-- 一批没跑完时不要再点运行，否则会再排一整批；想停下就清空队列。
+- 一批没跑完时可以改提示词/模型/LoRA/轮数/文件夹再点运行，新的一整批会排在上一批后面，按顺序跑完。
+- 内容完全没改又点了一次（误连点）会自动整次跳过，不会重复出图；想停下就清空队列。
 - 节点上的「序号」保持 0。
