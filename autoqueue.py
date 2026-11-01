@@ -133,6 +133,53 @@ def _active_fps():
     return fps
 
 
+TRIGGER_KEY = "全局触发词"
+
+
+def _trigger_sep(trigger):
+    """触发词和正文之间的分隔：含中文用“，”，否则用“, ”。"""
+    return "，" if any("\u4e00" <= c <= "\u9fff" for c in trigger) else ", "
+
+
+def prepend_trigger(strings, trigger):
+    """给每个非空段的第一行正文前面加上触发词（# 行、空段不动；已经以触发词开头的不重复加）。"""
+    trigger = (trigger or "").strip().rstrip(",，、;；").strip()
+    if not trigger or not isinstance(strings, str):
+        return strings
+    sep = _trigger_sep(trigger)
+    out, need = [], True
+    for line in strings.split("\n"):
+        if line.startswith("#"):
+            need = True
+        elif need and line.strip():
+            body = line.lstrip()
+            if not body.startswith(trigger):
+                line = line[:len(line) - len(body)] + trigger + sep + body
+            need = False
+        out.append(line)
+    return "\n".join(out)
+
+
+def apply_trigger(prompt):
+    """点运行时把「全局触发词」写进连着的提示词列表每一段的开头，然后清空（副本不会重复加）。
+    这样它在随机变量展开之前就已经在正文里，最终的文本编码和「本次实际提示词」都能看到。"""
+    for nid, node in prompt.items():
+        if not isinstance(node, dict) or node.get("class_type") != "PromptCycleAutoQueue":
+            continue
+        inp = node.get("inputs", {})
+        trig = inp.get(TRIGGER_KEY)
+        if not isinstance(trig, str) or not trig.strip():
+            continue
+        for other in prompt.values():
+            if not isinstance(other, dict) or other.get("class_type") != "ImpactStringSelector":
+                continue
+            oi = other.get("inputs", {})
+            sel = oi.get("select")
+            if isinstance(sel, list) and str(sel[0]) == str(nid) and isinstance(oi.get("strings"), str):
+                oi["strings"] = prepend_trigger(oi["strings"], trig)
+        inp[TRIGGER_KEY] = ""
+
+
 def _on_prompt(json_data):
     """每次点运行（POST /prompt）时：给原始任务打上内容指纹；如果同样内容的一套还在队列里没跑完，就标记成“重复点击”。
     这样后点的那次即使排在整套副本后面才轮到，也能认出来是重复的。"""
@@ -142,6 +189,10 @@ def _on_prompt(json_data):
             return json_data
         # 先定下日期（必须在算指纹之前，原始任务执行时重算的指纹才能对上）
         resolve_prompt_dates(prompt)
+        try:
+            apply_trigger(prompt)
+        except Exception as e:
+            print(f"[狗蛋自动排队] 加全局触发词出错：{e}")
         hit = next(((nid, n["class_type"]) for nid, n in prompt.items() if isinstance(n, dict)
                     and n.get("class_type") in AUTO_NODES and n.get("inputs", {}).get("自动排队") is True), None)
         if not hit:
@@ -377,6 +428,7 @@ class PromptCycleAutoQueue:
             },
             "optional": {
                 "每张随机种子": ("BOOLEAN", {"default": True, "tooltip": "开着时自动排进去的每一张都换新的随机种子（rgthree Seed 和采样器种子都会换）"}),
+                "全局触发词": ("STRING", {"default": "", "tooltip": "可空。填了会自动加在每一段提示词最前面（例如 LoRA 触发词），在随机变量展开之前加，空着就什么都不加"}),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"},
         }
@@ -401,7 +453,7 @@ class PromptCycleAutoQueue:
                 return nonempty_index(inp["strings"])
         raise RuntimeError("没找到连着「序号」的提示词列表节点（Impact String Selector，多行模式）")
 
-    def run(self, 轮数, 自动排队, 序号, 每张随机种子=True, prompt=None, extra_pnginfo=None, unique_id=None):
+    def run(self, 轮数, 自动排队, 序号, 每张随机种子=True, 全局触发词="", prompt=None, extra_pnginfo=None, unique_id=None):
         idx = self._count(prompt, unique_id)
         n = len(idx)
         total = n * 轮数
