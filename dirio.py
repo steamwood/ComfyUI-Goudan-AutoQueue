@@ -128,6 +128,7 @@ class SeedVR2DirSave:
             "输出设置": (OUTPUT_TYPE, {"tooltip": "连「输出设置」。不连时和以前一样存 PNG、不写元数据。"}),
             "源文件": ("STRING", {"forceInput": True, "tooltip": "连读图节点的 源文件（用来保留原图 ICC/EXIF）"}),
             "实际提示词": ("STRING", {"forceInput": True, "tooltip": "可选：连实际用的提示词，写进输出目录的「还原记录.csv」"}),
+            "还原记录": ("BOOLEAN", {"default": False, "tooltip": "开：每保存一张图，在日期文件夹（只放大时是输出目录）的「还原记录.csv」追加一行：文件名、实际提示词、种子、模型、LoRA、采样设置等。默认关，关着什么都不写。"}),
         }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ()
@@ -135,7 +136,7 @@ class SeedVR2DirSave:
     FUNCTION = "save"
     CATEGORY = "SeedVR2 目录读写"
 
-    def save(self, 图像, 文件名, 输出目录, 输出设置=None, 源文件=None, 实际提示词=None, prompt=None, extra_pnginfo=None, unique_id=None):
+    def save(self, 图像, 文件名, 输出目录, 输出设置=None, 源文件=None, 实际提示词=None, 还原记录=False, prompt=None, extra_pnginfo=None, unique_id=None):
         settings = dict(legacy_settings())
         settings.update(输出设置 or {})
         ext = EXTENSIONS.get(settings["格式"], ".png")
@@ -165,5 +166,6 @@ class SeedVR2DirSave:
             except Exception:
                 pass
         from .genlog import write_records
-        write_records(输出目录, [f for f, _ in saved], [s for _, s in saved], prompt, unique_id, extra_pnginfo, 实际提示词, 源文件)
+        if 还原记录:
+            write_records(输出目录, [f for f, _ in saved], [s for _, s in saved], prompt, unique_id, extra_pnginfo, 实际提示词, 源文件)
         return {"ui": {"images": ui}}

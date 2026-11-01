@@ -75,6 +75,16 @@
      "shape": 7,
      "type": "STRING",
      "link": 301
+    },
+    {
+     "localized_name": "还原记录",
+     "name": "还原记录",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "还原记录"
+     },
+     "link": null
     }
    ],
    "outputs": [
@@ -102,7 +112,8 @@
     "ver": "1.2.0"
    },
    "widgets_values": [
-    "Krea2-USD-%date:yyyyMMddhhmmss%"
+    "Krea2-USD-%date:yyyyMMddhhmmss%",
+    false
    ]
   },
   {
@@ -776,6 +787,16 @@
      "shape": 7,
      "type": "STRING",
      "link": 302
+    },
+    {
+     "localized_name": "还原记录",
+     "name": "还原记录",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "还原记录"
+     },
+     "link": null
     }
    ],
    "outputs": [
@@ -803,7 +824,8 @@
     "ver": "1.2.0"
    },
    "widgets_values": [
-    "Krea2-2ST-%date:yyyyMMddhhmmss%"
+    "Krea2-2ST-%date:yyyyMMddhhmmss%",
+    false
    ]
   },
   {
@@ -2995,6 +3017,16 @@
      "shape": 7,
      "type": "STRING",
      "link": 303
+    },
+    {
+     "localized_name": "还原记录",
+     "name": "还原记录",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "还原记录"
+     },
+     "link": null
     }
    ],
    "outputs": [
@@ -3022,7 +3054,8 @@
     "ver": "1.2.0"
    },
    "widgets_values": [
-    "seedvr2_after-%date:yyyyMMddhhmmss%"
+    "seedvr2_after-%date:yyyyMMddhhmmss%",
+    false
    ]
   },
   {
@@ -9167,13 +9200,26 @@
      "shape": 7,
      "type": "STRING",
      "link": 304
+    },
+    {
+     "localized_name": "还原记录",
+     "name": "还原记录",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "还原记录"
+     },
+     "link": null
     }
    ],
    "outputs": [],
    "title": "只放大：USD 中间图 → 原目录/SeedVR2/文件名_USD（USD+SeedVR2 都开时）",
    "properties": {
     "Node name for S&R": "SeedVR2DirSave"
-   }
+   },
+   "widgets_values": [
+    false
+   ]
   },
   {
    "id": 362,
@@ -9274,13 +9320,26 @@
      "shape": 7,
      "type": "STRING",
      "link": 305
+    },
+    {
+     "localized_name": "还原记录",
+     "name": "还原记录",
+     "shape": 7,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "还原记录"
+     },
+     "link": null
     }
    ],
    "outputs": [],
    "title": "只放大：最终图 → 原目录/SeedVR2/文件名+后缀",
    "properties": {
     "Node name for S&R": "SeedVR2DirSave"
-   }
+   },
+   "widgets_values": [
+    false
+   ]
   },
   {
    "id": 370,

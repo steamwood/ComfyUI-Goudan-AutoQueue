@@ -198,6 +198,7 @@ class GoudanSaveImage:
         }, "optional": {
             "输出设置": (OUTPUT_TYPE, {"tooltip": "连「输出设置」（格式 / 质量 / 元数据）。不连时和 ComfyUI 自带的保存图像一样：PNG、写入工作流。"}),
             "实际提示词": ("STRING", {"forceInput": True, "tooltip": "可选：连随机展开后的提示词，写进日期文件夹的「还原记录.csv」"}),
+            "还原记录": ("BOOLEAN", {"default": False, "tooltip": "开：每保存一张图，在日期文件夹（只放大时是输出目录）的「还原记录.csv」追加一行：文件名、实际提示词、种子、模型、LoRA、采样设置等。默认关，关着什么都不写。"}),
         }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE",)
@@ -208,7 +209,7 @@ class GoudanSaveImage:
     CATEGORY = "狗蛋工具"
     DESCRIPTION = "存到 ComfyUI 的 output 文件夹，格式/质量/元数据按「输出设置」（jpg/png/webp）。文件名规则和自带的保存图像相同：前缀_00001_.扩展名。"
 
-    def save(self, images, filename_prefix="ComfyUI", 输出设置=None, 实际提示词=None, prompt=None, extra_pnginfo=None, unique_id=None):
+    def save(self, images, filename_prefix="ComfyUI", 输出设置=None, 实际提示词=None, 还原记录=False, prompt=None, extra_pnginfo=None, unique_id=None):
         import folder_paths
         settings = dict(comfy_settings())
         settings.update(输出设置 or {})
@@ -231,5 +232,6 @@ class GoudanSaveImage:
         from .genlog import record_dir_for_output, write_records
         rec_dir = record_dir_for_output(subfolder, out_dir)
         rel = [os.path.relpath(os.path.join(full_folder, r["filename"]), rec_dir) for r in results]
-        write_records(rec_dir, rel, [(width, height)] * len(rel), prompt, unique_id, extra_pnginfo, 实际提示词)
+        if 还原记录:
+            write_records(rec_dir, rel, [(width, height)] * len(rel), prompt, unique_id, extra_pnginfo, 实际提示词)
         return {"ui": {"images": results}, "result": (images,)}
