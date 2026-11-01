@@ -227,14 +227,11 @@ def _validate(srv, prompt_id, p):
 
 
 def _client_id(srv):
-    """发起这次运行的页面的 client_id（ComfyUI 执行时会把当前任务的 client_id 放在 srv.client_id）。
-    没有就用当前最后连上的页面，保证副本任务的进度/图片/文字能显示到界面上。"""
-    cid = getattr(srv, "client_id", None)
-    socks = getattr(srv, "sockets", None) or {}
-    if cid and (not socks or cid in socks):
-        return cid
-    if socks:
-        return list(socks.keys())[-1]
+    """发起这次运行的页面的 client_id（ComfyUI 执行时会把当前任务的 client_id 放在 srv.client_id），
+    副本任务带上它，进度/图片/文字就能显示到发起页面上。没有时为 None，ComfyUI 会发给所有打开的页面。"""
+    return getattr(srv, "client_id", None) or None
+    if clients:
+        return list(clients.keys())[-1]
     return cid
 
 
