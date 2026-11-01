@@ -46,7 +46,6 @@ git clone https://github.com/steamwood/ComfyUI-Goudan-AutoQueue.git
 
 重启 ComfyUI。无额外依赖。示例工作流在 `example_workflows/`。
 - `seedvr2_upscale_standalone_v2.json`：1.1.0 新版。左上「用户操作区」里只有路径、缩放设置、输出设置三个节点，其余都在「处理区（勿改）」。1.2.0 起读图节点上有「选择文件夹…」「选择图片…」按钮。
-- `krea2_prompt_cycle_v7.json`：Krea2 提示词循环出图（1.2.0）。左上「用户操作区（只改这里）」里是提示词列表、本次实际提示词、提示词循环（轮数）、分辨率、模型、LoRA、三个组开关和「输出设置」；其余在「提示词与文件名」「①生图与二采」「②USD高清重绘」「③SeedVR2放大」几个「勿改」组里。三张图（二采、USD 放大、SeedVR2 放大）都按同一个「输出设置」保存，默认 jpg、质量 95、不写元数据；文件名和以前一样：`日期/01_Krea2-2ST`、`日期/01_Krea2-USD`、`日期/seedvr/01_seedvr2_after`。需要 rgthree、Impact Pack、ComfyUI Essentials、Ultimate SD Upscale 和对应的模型。
 - `seedvr2_upscale_standalone.json`：旧版，仍然能用。
 
 ## 注意
