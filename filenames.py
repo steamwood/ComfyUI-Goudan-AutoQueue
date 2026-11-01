@@ -39,6 +39,11 @@ def replace_dates(text, now=None):
     return REPLACE_PATTERN.sub(repl, text)
 
 
+# 点运行时要换掉 %date:...% 的输入：本节点的「日期」，以及「保存图像（按输出设置）」没连线时直接填的文件名前缀
+# （ComfyUI 前端只替换自带保存节点的 %date%，这里补上；连了线的前缀是列表，不会被改）
+DATE_INPUTS = {NODE_CLASS: DATE_INPUT, "GoudanSaveImage": "filename_prefix"}
+
+
 def resolve_prompt_dates(prompt, now=None):
     """点运行（POST /prompt）时调用：把本节点「日期」里的 %date:...% 换成这一刻的日期，写回任务本身。
     自动排出来的副本是从这份任务复制的，所以整批共用同一个日期，跑过零点也不会变。返回替换了几个节点。"""
@@ -46,14 +51,17 @@ def resolve_prompt_dates(prompt, now=None):
         now = datetime.datetime.now()
     changed = 0
     for node in prompt.values():
-        if not isinstance(node, dict) or node.get("class_type") != NODE_CLASS:
+        if not isinstance(node, dict):
+            continue
+        key = DATE_INPUTS.get(node.get("class_type"))
+        if key is None:
             continue
         inputs = node.get("inputs", {})
-        value = inputs.get(DATE_INPUT)
+        value = inputs.get(key)
         if isinstance(value, str) and "%" in value:
             resolved = replace_dates(value, now)
             if resolved != value:
-                inputs[DATE_INPUT] = resolved
+                inputs[key] = resolved
                 changed += 1
     return changed
 

@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from PIL import Image, ImageOps
 
+from .browse import clean_path
 from .saving import DONE_EXTS, EXTENSIONS, OUTPUT_TYPE, legacy_settings, save_image, to_pil
 
 EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
@@ -12,8 +13,7 @@ TAG = "[SeedVR2 目录读写]"
 
 
 def _clean(p):
-    p = (p or "").strip().strip('"').strip("'").strip()
-    return os.path.normpath(os.path.expanduser(p)) if p else ""
+    return clean_path(p)
 
 
 def _collect(path):
@@ -61,7 +61,7 @@ class SeedVR2DirLoad:
     def INPUT_TYPES(cls):
         return {"required": {
             "路径": ("STRING", {"default": "", "multiline": False,
-                     "tooltip": "粘贴图片文件夹路径（批量，逐张处理）或单张图片路径。Windows“复制文件地址”带的引号会自动去掉。"}),
+                     "tooltip": "粘贴图片文件夹路径（批量，逐张处理）或单张图片路径，Windows「复制文件地址」带的引号会自动去掉。也可以点节点下面的「选择文件夹…」「选择图片…」按钮在系统窗口里选。"}),
             "后缀": ("STRING", {"default": "_SeedVR2", "tooltip": "输出文件名 = 原文件名 + 后缀"}),
             "自动排队": ("BOOLEAN", {"default": True, "tooltip": "开着时，点一次运行会自动把剩下没放大的张数排进队列，仍然逐张处理"}),
         }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}

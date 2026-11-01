@@ -50,7 +50,7 @@ class GoudanOutputSettings:
 
     RETURN_TYPES = (OUTPUT_TYPE,)
     RETURN_NAMES = ("输出设置",)
-    OUTPUT_TOOLTIPS = ("连「保存到原目录/SeedVR2」的 输出设置",)
+    OUTPUT_TOOLTIPS = ("连「保存到原目录/SeedVR2」或「保存图像（按输出设置）」的 输出设置（一个可以同时连好几个保存节点）",)
     FUNCTION = "build"
     CATEGORY = "SeedVR2 目录读写"
     DESCRIPTION = "保存格式、质量和元数据。改了格式也能断点续跑：已有任意格式（png/jpg/jpeg/webp）的结果都算做完。"
@@ -174,3 +174,57 @@ def save_image(pil, path, settings, source_path=None, prompt=None, extra_pnginfo
         pil.save(path, format="JPEG", quality=quality, subsampling=subsampling, optimize=True, **kwargs)
         return
     pil.save(path, format="WEBP", quality=quality, method=4, **kwargs)
+
+
+def comfy_settings():
+    """「保存图像（按输出设置）」没连「输出设置」时：和 ComfyUI 自带的「保存图像」一样，PNG 并写入工作流。"""
+    return {"格式": "png", "质量": 95, "保留元数据": True}
+
+
+def output_directory():
+    import folder_paths
+    return folder_paths.get_output_directory()
+
+
+class GoudanSaveImage:
+    """和 ComfyUI 自带的「保存图像」一样存到 ComfyUI 的 output 文件夹（文件名前缀可以带子文件夹，自动编号 _00001_，
+    界面里显示预览，并把图像原样输出给下游，比如图像对比），只是格式/质量/元数据按「输出设置」。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "images": ("IMAGE", {"tooltip": "要保存的图像"}),
+            "filename_prefix": ("STRING", {"default": "ComfyUI", "tooltip": "文件名前缀，可以带子文件夹，比如 日期/01_Krea2-2ST。存在 ComfyUI 的 output 文件夹里，后面自动加 _00001_ 编号和扩展名。也可以写 %date:yyyy-MM-dd%。"}),
+        }, "optional": {
+            "输出设置": (OUTPUT_TYPE, {"tooltip": "连「输出设置」（格式 / 质量 / 元数据）。不连时和 ComfyUI 自带的保存图像一样：PNG、写入工作流。"}),
+        }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}}
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    OUTPUT_TOOLTIPS = ("原样输出输入的图像（可以接图像对比等节点）",)
+    OUTPUT_NODE = True
+    FUNCTION = "save"
+    CATEGORY = "狗蛋工具"
+    DESCRIPTION = "存到 ComfyUI 的 output 文件夹，格式/质量/元数据按「输出设置」（jpg/png/webp）。文件名规则和自带的保存图像相同：前缀_00001_.扩展名。"
+
+    def save(self, images, filename_prefix="ComfyUI", 输出设置=None, prompt=None, extra_pnginfo=None):
+        import folder_paths
+        settings = dict(comfy_settings())
+        settings.update(输出设置 or {})
+        fmt = settings["格式"] if settings["格式"] in FORMATS else "png"
+        settings["格式"] = fmt
+        ext = EXTENSIONS[fmt]
+        out_dir = output_directory()
+        height = int(images[0].shape[0])
+        width = int(images[0].shape[1])
+        full_folder, filename, counter, subfolder, _prefix = folder_paths.get_save_image_path(filename_prefix, out_dir, width, height)
+        os.makedirs(full_folder, exist_ok=True)
+        results = []
+        for batch_number, image in enumerate(images):
+            pil = to_pil(image, fmt)
+            name = filename.replace("%batch_num%", str(batch_number))
+            file = f"{name}_{counter:05}_{ext}"
+            save_image(pil, os.path.join(full_folder, file), settings, None, prompt, extra_pnginfo)
+            results.append({"filename": file, "subfolder": subfolder, "type": "output"})
+            counter += 1
+        return {"ui": {"images": results}, "result": (images,)}

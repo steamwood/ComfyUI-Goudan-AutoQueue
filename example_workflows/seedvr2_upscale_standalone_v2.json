@@ -9,7 +9,7 @@
       "type": "SeedVR2DirLoad",
       "size": [
         460,
-        166
+        214
       ],
       "flags": {},
       "order": 0,
@@ -79,7 +79,7 @@
       ],
       "properties": {
         "cnr_id": "comfyui-goudan-autoqueue",
-        "ver": "1.1.0",
+        "ver": "1.2.0",
         "Node name for S&R": "SeedVR2DirLoad"
       },
       "widgets_values": [
@@ -101,7 +101,7 @@
       "type": "GoudanScaleSettings",
       "pos": [
         20,
-        290
+        324
       ],
       "size": [
         460,
@@ -161,7 +161,7 @@
       ],
       "properties": {
         "cnr_id": "comfyui-goudan-autoqueue",
-        "ver": "1.1.0",
+        "ver": "1.2.0",
         "Node name for S&R": "GoudanScaleSettings"
       },
       "widgets_values": [
@@ -179,7 +179,7 @@
       "type": "GoudanOutputSettings",
       "pos": [
         20,
-        484
+        518
       ],
       "size": [
         460,
@@ -229,7 +229,7 @@
       ],
       "properties": {
         "cnr_id": "comfyui-goudan-autoqueue",
-        "ver": "1.1.0",
+        "ver": "1.2.0",
         "Node name for S&R": "GoudanOutputSettings"
       },
       "widgets_values": [
@@ -282,7 +282,7 @@
       ],
       "properties": {
         "cnr_id": "comfyui-goudan-autoqueue",
-        "ver": "1.1.0",
+        "ver": "1.2.0",
         "Node name for S&R": "GoudanScalePrepare"
       },
       "widgets_values": [],
@@ -902,7 +902,7 @@
       ],
       "properties": {
         "cnr_id": "comfyui-goudan-autoqueue",
-        "ver": "1.1.0",
+        "ver": "1.2.0",
         "Node name for S&R": "GoudanScaleFinish"
       },
       "widgets_values": [],
@@ -954,7 +954,7 @@
       "outputs": [],
       "properties": {
         "cnr_id": "comfyui-goudan-autoqueue",
-        "ver": "1.1.0",
+        "ver": "1.2.0",
         "Node name for S&R": "SeedVR2DirSave"
       },
       "widgets_values": [],
@@ -1160,7 +1160,7 @@
         0,
         0,
         500,
-        610
+        650
       ],
       "color": "#3f789e",
       "font_size": 24,
@@ -1173,7 +1173,7 @@
         540,
         0,
         1770,
-        610
+        650
       ],
       "color": "#444",
       "font_size": 24,
