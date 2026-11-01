@@ -226,15 +226,31 @@ def _validate(srv, prompt_id, p):
     return res
 
 
+def _client_id(srv):
+    """发起这次运行的页面的 client_id（ComfyUI 执行时会把当前任务的 client_id 放在 srv.client_id）。
+    没有就用当前最后连上的页面，保证副本任务的进度/图片/文字能显示到界面上。"""
+    cid = getattr(srv, "client_id", None)
+    socks = getattr(srv, "sockets", None) or {}
+    if cid and (not socks or cid in socks):
+        return cid
+    if socks:
+        return list(socks.keys())[-1]
+    return cid
+
+
 def _queue_direct(srv, item_len, prompts, extra, numbers, tag):
     """直接按 /prompt 的流程（on_prompt 处理 → 校验 → 入队）把副本放进队列。返回 (成功数, 失败数)。
     中途出错不再改用别的方式补排，只在日志里报错，并把没排的算进失败数。"""
     import server as server_mod
     ok = 0
     bad = 0
+    cid = _client_id(srv)
     try:
         for p, number in zip(prompts, numbers):
             json_data = {"prompt": p, "extra_data": {"extra_pnginfo": extra}, "number": number}
+            if cid:
+                json_data["client_id"] = cid
+                json_data["extra_data"]["client_id"] = cid
             json_data = srv.trigger_on_prompt(json_data)
             p = json_data["prompt"]
             replacer = getattr(srv, "node_replace_manager", None)
