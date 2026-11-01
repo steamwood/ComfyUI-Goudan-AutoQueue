@@ -5,33 +5,13 @@ import hashlib
 import inspect
 import json
 import random
-import ssl
 import threading
 import time
-import urllib.error
-import urllib.request
 import uuid
 
 from .filenames import resolve_prompt_dates
 
 SEED_KEYS = ("seed", "noise_seed")
-
-
-def _server_url():
-    try:
-        from server import PromptServer
-        from comfy.cli_args import args
-        srv = PromptServer.instance
-        port = getattr(srv, "port", None) or args.port
-        addr = getattr(srv, "address", None) or "127.0.0.1"
-        if addr in ("0.0.0.0", "::", "", None) or "," in str(addr):
-            addr = "127.0.0.1"
-        if ":" in addr and not addr.startswith("["):
-            addr = f"[{addr}]"
-        scheme = "https" if getattr(args, "tls_keyfile", None) else "http"
-        return f"{scheme}://{addr}:{port}/prompt"
-    except Exception:
-        return "http://127.0.0.1:8188/prompt"
 
 
 def _seed_rules(extra_pnginfo):
@@ -247,73 +227,43 @@ def _validate(srv, prompt_id, p):
 
 
 def _queue_direct(srv, item_len, prompts, extra, numbers, tag):
-    """不走 HTTP，直接按 /prompt 的流程（on_prompt 处理 → 校验 → 入队）把副本放进队列。返回 (成功数, 失败数)。"""
+    """直接按 /prompt 的流程（on_prompt 处理 → 校验 → 入队）把副本放进队列。返回 (成功数, 失败数)。
+    中途出错不再改用别的方式补排，只在日志里报错，并把没排的算进失败数。"""
     import server as server_mod
     ok = 0
     bad = 0
-    for p, number in zip(prompts, numbers):
-        json_data = {"prompt": p, "extra_data": {"extra_pnginfo": extra}, "number": number}
-        json_data = srv.trigger_on_prompt(json_data)
-        p = json_data["prompt"]
-        replacer = getattr(srv, "node_replace_manager", None)
-        if replacer is not None and hasattr(replacer, "apply_replacements"):
-            replacer.apply_replacements(p)
-        prompt_id = str(uuid.uuid4())
-        valid = _validate(srv, prompt_id, p)
-        if not valid[0]:
-            bad += 1
-            if bad <= 3:
-                print(f"[{tag}] 副本校验没通过，跳过这一个：{valid[1]} {valid[3]}")
-            continue
-        extra_data = dict(json_data.get("extra_data") or {})
-        extra_data.pop("workflow_metadata", None)
-        meta_fn = getattr(server_mod, "workflow_metadata_from_prompt", None)
-        if meta_fn is not None:
-            meta = meta_fn(extra_data)
-            if meta is not None:
-                extra_data["workflow_metadata"] = meta
-        extra_data["create_time"] = int(time.time() * 1000)
-        item = (number, prompt_id, p, extra_data, valid[2])
-        if item_len == 6:
-            item = item + ({},)
-        srv.prompt_queue.put(item)
-        ok += 1
-    return ok, bad
-
-
-def _post_one(url, ctx, data, tag):
-    """HTTP 备用方式：一个副本最多试 3 次。"""
-    body = json.dumps(data).encode("utf-8")
-    err = None
-    for attempt in range(3):
-        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-        try:
-            urllib.request.urlopen(req, timeout=60, context=ctx).read()
-            return True
-        except urllib.error.HTTPError as e:
-            err = e
-            if e.code == 400:
-                break  # 校验没通过，重试也一样
-        except Exception as e:
-            err = e
-        time.sleep(1 + attempt)
-    print(f"[{tag}] 有一个副本没排进去：{err}")
-    return False
-
-
-def _queue_http(prompts, extra, numbers, tag):
-    url = _server_url()
-    ctx = ssl._create_unverified_context() if url.startswith("https") else None
-    ok = 0
-    bad = 0
-    for p, number in zip(prompts, numbers):
-        data = {"prompt": p, "extra_data": {"extra_pnginfo": extra}}
-        if number is not None:
-            data["number"] = number
-        if _post_one(url, ctx, data, tag):
+    try:
+        for p, number in zip(prompts, numbers):
+            json_data = {"prompt": p, "extra_data": {"extra_pnginfo": extra}, "number": number}
+            json_data = srv.trigger_on_prompt(json_data)
+            p = json_data["prompt"]
+            replacer = getattr(srv, "node_replace_manager", None)
+            if replacer is not None and hasattr(replacer, "apply_replacements"):
+                replacer.apply_replacements(p)
+            prompt_id = str(uuid.uuid4())
+            valid = _validate(srv, prompt_id, p)
+            if not valid[0]:
+                bad += 1
+                if bad <= 3:
+                    print(f"[{tag}] 副本校验没通过，跳过这一个：{valid[1]} {valid[3]}")
+                continue
+            extra_data = dict(json_data.get("extra_data") or {})
+            extra_data.pop("workflow_metadata", None)
+            meta_fn = getattr(server_mod, "workflow_metadata_from_prompt", None)
+            if meta_fn is not None:
+                meta = meta_fn(extra_data)
+                if meta is not None:
+                    extra_data["workflow_metadata"] = meta
+            extra_data["create_time"] = int(time.time() * 1000)
+            item = (number, prompt_id, p, extra_data, valid[2])
+            if item_len == 6:
+                item = item + ({},)
+            srv.prompt_queue.put(item)
             ok += 1
-        else:
-            bad += 1
+    except Exception as e:
+        left = len(prompts) - ok - bad
+        print(f"[{tag}] 出错：直接入队中途失败，已排进去 {ok} 个，剩下 {left} 个没有排：{e}")
+        bad += left
     return ok, bad
 
 
@@ -357,22 +307,15 @@ def queue_copies(prompts, extra_pnginfo, tag, fp=None, prompt=None):
             item_len = _queue_item_len(srv)
         except Exception:
             pass
-        direct = item_len is not None and getattr(srv, "loop", None) is not None
-        if direct and None in numbers:
-            start = srv.number
-            srv.number += total
-            numbers = [start + i for i in range(total)]
-        if direct:
-            try:
-                ok, bad = _queue_direct(srv, item_len, prompts, extra, numbers, tag)
-            except Exception as e:
-                print(f"[{tag}] 直接入队出错，改用 HTTP 继续排剩下的：{e}")
-                direct = False
-        if not direct:
-            done = ok + bad
-            more_ok, more_bad = _queue_http(prompts[done:], extra, numbers[done:], tag)
-            ok += more_ok
-            bad += more_bad
+        if item_len is None or getattr(srv, "loop", None) is None:
+            print(f"[{tag}] 出错：读不到 ComfyUI 队列（这个版本的 ComfyUI 可能不兼容），没法自动排队，{total} 个副本都没排进去。")
+            bad = total
+        else:
+            if None in numbers:
+                start = srv.number
+                srv.number += total
+                numbers = [start + i for i in range(total)]
+            ok, bad = _queue_direct(srv, item_len, prompts, extra, numbers, tag)
     finally:
         if fp:
             with _posting_lock:

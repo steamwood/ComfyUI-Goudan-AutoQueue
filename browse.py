@@ -16,7 +16,6 @@ import base64
 import ipaddress
 import os
 import shutil
-import socket
 import subprocess
 import sys
 
@@ -262,29 +261,60 @@ def open_dialog(kind, current=""):
     raise DialogUnavailable(detail)
 
 
-def is_local_address(remote):
-    """请求是不是从运行 ComfyUI 的这台电脑发来的（127.0.0.1、::1，或本机网卡自己的地址）。
-    选择窗口弹在服务器这台电脑上，别的电脑用浏览器连过来时看不到窗口，所以只给本机用。"""
-    if not remote:
-        return False
-    host = remote.split("%", 1)[0]
+def _parse_ip(text):
+    """把地址文字变成 ipaddress 对象（去掉 IPv6 的 %网卡 后缀，::ffff:1.2.3.4 换成 IPv4）；不是 IP 就返回 None。"""
+    if not text or not isinstance(text, str):
+        return None
     try:
-        addr = ipaddress.ip_address(host)
+        addr = ipaddress.ip_address(text.split("%", 1)[0])
     except ValueError:
+        return None
+    if getattr(addr, "ipv4_mapped", None) is not None:
+        addr = addr.ipv4_mapped
+    return addr
+
+
+def is_local_address(remote, local=None):
+    """请求是不是从运行 ComfyUI 的这台电脑发来的。
+    - 对方地址是 127.0.0.1、::1 这类回环地址 → 是本机；
+    - 对方地址和这次连接在服务器这边的地址（local）相同，或者是本机某块网卡自己的地址 → 也是本机（本机浏览器用局域网 IP 打开 ComfyUI 的情况）。
+    只比较地址，不做任何网络操作。选择窗口弹在服务器这台电脑上，别的电脑用浏览器连过来时看不到窗口，所以只给本机用。"""
+    addr = _parse_ip(remote)
+    if addr is None:
         return False
     if addr.is_loopback:
         return True
-    if getattr(addr, "ipv4_mapped", None) is not None:
-        addr = addr.ipv4_mapped
-        if addr.is_loopback:
-            return True
-    family = socket.AF_INET6 if addr.version == 6 else socket.AF_INET
-    try:
-        with socket.socket(family, socket.SOCK_DGRAM) as s:
-            s.bind((str(addr), 0))
+    own = _parse_ip(local)
+    if own is not None and not own.is_unspecified and own == addr:
         return True
-    except OSError:
-        return False
+    return addr in _own_addresses()
+
+
+def _own_addresses():
+    """这台电脑各个网卡自己的 IP（用 ComfyUI 本来就带的 psutil 读本机网卡配置，不发任何网络请求）。
+    本机浏览器用另一块网卡的地址打开 ComfyUI 时，对方地址会是本机某块网卡的地址。"""
+    addrs = set()
+    try:
+        import psutil
+        for entries in psutil.net_if_addrs().values():
+            for e in entries:
+                a = _parse_ip(e.address)
+                if a is not None and not a.is_unspecified:
+                    addrs.add(a)
+    except Exception:
+        pass
+    return addrs
+
+
+def _local_address(request):
+    """这次连接在服务器这边的地址（aiohttp 已经有的连接信息，不新建连接）。"""
+    try:
+        sockname = request.transport.get_extra_info("sockname")
+    except Exception:
+        return None
+    if isinstance(sockname, (tuple, list)) and sockname:
+        return sockname[0]
+    return None
 
 
 class BrowseService:
@@ -296,7 +326,7 @@ class BrowseService:
 
     async def handle(self, request):
         from aiohttp import web
-        if not is_local_address(request.remote):
+        if not is_local_address(request.remote, _local_address(request)):
             return web.json_response({"status": "error", "error": "选择窗口只能在运行 ComfyUI 的这台电脑上用。" + PASTE_HINT}, status=403)
         data = {}
         if request.can_read_body:
