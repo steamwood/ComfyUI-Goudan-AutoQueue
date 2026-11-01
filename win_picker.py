@@ -37,7 +37,8 @@ VT_SETTITLE = 17
 VT_GETRESULT = 20
 VT_ITEM_GETDISPLAYNAME = 5  # IShellItem::GetDisplayName
 
-IMAGE_SPEC = "*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.tif;*.tiff"
+IMAGE_EXTS = ("png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff")
+IMAGE_SPEC = chr(59).join("*." + e for e in IMAGE_EXTS)  # Windows filter list
 FILTERS = (("图片 (" + IMAGE_SPEC + ")", IMAGE_SPEC), ("所有文件 (*.*)", "*.*"))
 DIALOG_TIMEOUT = 30 * 60
 
