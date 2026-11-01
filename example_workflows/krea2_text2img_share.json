@@ -2,7 +2,7 @@
  "id": "2a6f98e0-3ebc-5d8b-aad7-6648cb266e12",
  "revision": 0,
  "last_node_id": 381,
- "last_link_id": 300,
+ "last_link_id": 305,
  "nodes": [
   {
    "id": 1,
@@ -68,6 +68,13 @@
       "name": "filename_prefix"
      },
      "link": 288
+    },
+    {
+     "localized_name": "实际提示词",
+     "name": "实际提示词",
+     "shape": 7,
+     "type": "STRING",
+     "link": 301
     }
    ],
    "outputs": [
@@ -762,6 +769,13 @@
       "name": "filename_prefix"
      },
      "link": 201
+    },
+    {
+     "localized_name": "实际提示词",
+     "name": "实际提示词",
+     "shape": 7,
+     "type": "STRING",
+     "link": 302
     }
    ],
    "outputs": [
@@ -2974,6 +2988,13 @@
       "name": "filename_prefix"
      },
      "link": 203
+    },
+    {
+     "localized_name": "实际提示词",
+     "name": "实际提示词",
+     "shape": 7,
+     "type": "STRING",
+     "link": 303
     }
    ],
    "outputs": [
@@ -6854,7 +6875,12 @@
      "pos": null,
      "slot_index": null,
      "links": [
-      248
+      248,
+      301,
+      302,
+      303,
+      304,
+      305
      ]
     }
    ],
@@ -9134,6 +9160,13 @@
      "type": "STRING",
      "pos": null,
      "link": 296
+    },
+    {
+     "localized_name": "实际提示词",
+     "name": "实际提示词",
+     "shape": 7,
+     "type": "STRING",
+     "link": 304
     }
    ],
    "outputs": [],
@@ -9234,6 +9267,13 @@
      "type": "STRING",
      "pos": null,
      "link": 300
+    },
+    {
+     "localized_name": "实际提示词",
+     "name": "实际提示词",
+     "shape": 7,
+     "type": "STRING",
+     "link": 305
     }
    ],
    "outputs": [],
@@ -10760,6 +10800,46 @@
    0,
    362,
    4,
+   "STRING"
+  ],
+  [
+   301,
+   324,
+   0,
+   1,
+   3,
+   "STRING"
+  ],
+  [
+   302,
+   324,
+   0,
+   6,
+   3,
+   "STRING"
+  ],
+  [
+   303,
+   324,
+   0,
+   94,
+   3,
+   "STRING"
+  ],
+  [
+   304,
+   324,
+   0,
+   361,
+   5,
+   "STRING"
+  ],
+  [
+   305,
+   324,
+   0,
+   362,
+   5,
    "STRING"
   ]
  ],

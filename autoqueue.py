@@ -180,6 +180,16 @@ def apply_trigger(prompt):
         inp[TRIGGER_KEY] = ""
 
 
+def fix_random_seeds(prompt):
+    """API 直接提交时 rgthree Seed 可能还是 -1/-2/-3（让节点自己随机），这样就不知道实际用了哪个种子。
+    这里先换成具体的随机数，「还原记录」里记下的就是真正用到的种子。界面点运行时前端已经换好了，不受影响。"""
+    for node in prompt.values():
+        if isinstance(node, dict) and node.get("class_type") == "Seed (rgthree)":
+            inp = node.get("inputs", {})
+            if inp.get("seed") in (-1, -2, -3):
+                inp["seed"] = random.randint(0, 2**50)
+
+
 def _on_prompt(json_data):
     """每次点运行（POST /prompt）时：给原始任务打上内容指纹；如果同样内容的一套还在队列里没跑完，就标记成“重复点击”。
     这样后点的那次即使排在整套副本后面才轮到，也能认出来是重复的。"""
@@ -193,6 +203,7 @@ def _on_prompt(json_data):
             apply_trigger(prompt)
         except Exception as e:
             print(f"[狗蛋自动排队] 加全局触发词出错：{e}")
+        fix_random_seeds(prompt)
         hit = next(((nid, n["class_type"]) for nid, n in prompt.items() if isinstance(n, dict)
                     and n.get("class_type") in AUTO_NODES and n.get("inputs", {}).get("自动排队") is True), None)
         if not hit:

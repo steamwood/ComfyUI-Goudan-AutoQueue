@@ -197,7 +197,8 @@ class GoudanSaveImage:
             "filename_prefix": ("STRING", {"default": "ComfyUI", "tooltip": "文件名前缀，可以带子文件夹，比如 日期/01_Krea2-2ST。存在 ComfyUI 的 output 文件夹里，后面自动加 _00001_ 编号和扩展名。也可以写 %date:yyyy-MM-dd%。"}),
         }, "optional": {
             "输出设置": (OUTPUT_TYPE, {"tooltip": "连「输出设置」（格式 / 质量 / 元数据）。不连时和 ComfyUI 自带的保存图像一样：PNG、写入工作流。"}),
-        }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}}
+            "实际提示词": ("STRING", {"forceInput": True, "tooltip": "可选：连随机展开后的提示词，写进日期文件夹的「还原记录.csv」"}),
+        }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("images",)
@@ -207,7 +208,7 @@ class GoudanSaveImage:
     CATEGORY = "狗蛋工具"
     DESCRIPTION = "存到 ComfyUI 的 output 文件夹，格式/质量/元数据按「输出设置」（jpg/png/webp）。文件名规则和自带的保存图像相同：前缀_00001_.扩展名。"
 
-    def save(self, images, filename_prefix="ComfyUI", 输出设置=None, prompt=None, extra_pnginfo=None):
+    def save(self, images, filename_prefix="ComfyUI", 输出设置=None, 实际提示词=None, prompt=None, extra_pnginfo=None, unique_id=None):
         import folder_paths
         settings = dict(comfy_settings())
         settings.update(输出设置 or {})
@@ -227,4 +228,8 @@ class GoudanSaveImage:
             save_image(pil, os.path.join(full_folder, file), settings, None, prompt, extra_pnginfo)
             results.append({"filename": file, "subfolder": subfolder, "type": "output"})
             counter += 1
+        from .genlog import record_dir_for_output, write_records
+        rec_dir = record_dir_for_output(subfolder, out_dir)
+        rel = [os.path.relpath(os.path.join(full_folder, r["filename"]), rec_dir) for r in results]
+        write_records(rec_dir, rel, [(width, height)] * len(rel), prompt, unique_id, extra_pnginfo, 实际提示词)
         return {"ui": {"images": results}, "result": (images,)}

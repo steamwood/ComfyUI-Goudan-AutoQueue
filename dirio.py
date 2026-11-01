@@ -127,19 +127,21 @@ class SeedVR2DirSave:
         }, "optional": {
             "输出设置": (OUTPUT_TYPE, {"tooltip": "连「输出设置」。不连时和以前一样存 PNG、不写元数据。"}),
             "源文件": ("STRING", {"forceInput": True, "tooltip": "连读图节点的 源文件（用来保留原图 ICC/EXIF）"}),
-        }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}}
+            "实际提示词": ("STRING", {"forceInput": True, "tooltip": "可选：连实际用的提示词，写进输出目录的「还原记录.csv」"}),
+        }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ()
     OUTPUT_NODE = True
     FUNCTION = "save"
     CATEGORY = "SeedVR2 目录读写"
 
-    def save(self, 图像, 文件名, 输出目录, 输出设置=None, 源文件=None, prompt=None, extra_pnginfo=None):
+    def save(self, 图像, 文件名, 输出目录, 输出设置=None, 源文件=None, 实际提示词=None, prompt=None, extra_pnginfo=None, unique_id=None):
         settings = dict(legacy_settings())
         settings.update(输出设置 or {})
         ext = EXTENSIONS.get(settings["格式"], ".png")
         os.makedirs(输出目录, exist_ok=True)
         ui = []
+        saved = []
         for i, im in enumerate(图像):
             pil = to_pil(im, settings["格式"])
             stem = 文件名 + (f"_{i+1}" if len(图像) > 1 else "")
@@ -150,6 +152,7 @@ class SeedVR2DirSave:
                 n += 1
             save_image(pil, path, settings, 源文件, prompt, extra_pnginfo)
             print(f"{TAG} 已保存 {path}（{pil.width}x{pil.height}）")
+            saved.append((os.path.basename(path), (pil.width, pil.height)))
             try:
                 import folder_paths
                 tmp = folder_paths.get_temp_directory()
@@ -161,4 +164,6 @@ class SeedVR2DirSave:
                 ui.append({"filename": tname, "subfolder": "", "type": "temp"})
             except Exception:
                 pass
+        from .genlog import write_records
+        write_records(输出目录, [f for f, _ in saved], [s for _, s in saved], prompt, unique_id, extra_pnginfo, 实际提示词, 源文件)
         return {"ui": {"images": ui}}
