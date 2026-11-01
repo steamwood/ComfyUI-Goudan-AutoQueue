@@ -2,18 +2,28 @@
 from .dirio import SeedVR2DirLoad, SeedVR2DirSave
 from .autoqueue import PromptCycleAutoQueue
 from .filenames import PromptCycleFilenames
+from .scaling import GoudanScaleSettings, GoudanScalePrepare, GoudanScaleFinish
+from .saving import GoudanOutputSettings
 
 NODE_CLASS_MAPPINGS = {
     "SeedVR2DirLoad": SeedVR2DirLoad,
     "SeedVR2DirSave": SeedVR2DirSave,
     "PromptCycleAutoQueue": PromptCycleAutoQueue,
     "PromptCycleFilenames": PromptCycleFilenames,
+    "GoudanScaleSettings": GoudanScaleSettings,
+    "GoudanScalePrepare": GoudanScalePrepare,
+    "GoudanScaleFinish": GoudanScaleFinish,
+    "GoudanOutputSettings": GoudanOutputSettings,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SeedVR2DirLoad": "SeedVR2 按路径读图（逐张，自动排队）",
     "SeedVR2DirSave": "SeedVR2 保存到原目录/SeedVR2",
     "PromptCycleAutoQueue": "提示词循环（自动计条数 + 自动排队）",
     "PromptCycleFilenames": "文件名/文件夹（自动）",
+    "GoudanScaleSettings": "缩放设置",
+    "GoudanScalePrepare": "SeedVR2 前缩放（按缩放设置）",
+    "GoudanScaleFinish": "最终尺寸（精确缩放 / 缩小可跳过SeedVR2）",
+    "GoudanOutputSettings": "输出设置",
 }
 WEB_DIRECTORY = "./web"
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

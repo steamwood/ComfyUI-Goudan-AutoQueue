@@ -1,11 +1,14 @@
 """SeedVR2 目录读写：从任意路径（文件夹或单张图片）逐张读图，放大后存回 <原目录>/SeedVR2/。"""
 import os
-import hashlib
+import re
 import numpy as np
 import torch
 from PIL import Image, ImageOps
 
+from .saving import DONE_EXTS, EXTENSIONS, OUTPUT_TYPE, legacy_settings, save_image, to_pil
+
 EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
+TAG = "[SeedVR2 目录读写]"
 
 
 def _clean(p):
@@ -33,10 +36,22 @@ def _collect(path):
 
 
 def _done(out_dir, stem, suffix):
+    """输出目录里已经有「原文件名+后缀」的结果（png/jpg/jpeg/webp 任意一种，含 _001 这类重名编号）就算做完。"""
     if not os.path.isdir(out_dir):
         return False
     key = (stem + suffix).lower()
-    return any(f.lower().startswith(key) and f.lower().endswith(".png") for f in os.listdir(out_dir))
+    pattern = re.compile(re.escape(key) + r"(_\d+)*")
+    for f in os.listdir(out_dir):
+        name, ext = os.path.splitext(f.lower())
+        if ext in DONE_EXTS and pattern.fullmatch(name):
+            return True
+    return False
+
+
+def _has_alpha(img):
+    if img.mode in ("RGBA", "LA", "PA", "RGBa", "La"):
+        return True
+    return img.mode == "P" and "transparency" in img.info
 
 
 class SeedVR2DirLoad:
@@ -51,8 +66,9 @@ class SeedVR2DirLoad:
             "自动排队": ("BOOLEAN", {"default": True, "tooltip": "开着时，点一次运行会自动把剩下没放大的张数排进队列，仍然逐张处理"}),
         }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}
 
-    RETURN_TYPES = ("IMAGE", "STRING", "STRING")
-    RETURN_NAMES = ("图像", "文件名", "输出目录")
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("图像", "文件名", "输出目录", "源文件")
+    OUTPUT_TOOLTIPS = ("原图（带透明通道的图会保留透明）", "原文件名 + 后缀", "<原目录>/SeedVR2", "原图完整路径（保存节点用它读原图的 EXIF/ICC）")
     FUNCTION = "load"
     CATEGORY = "SeedVR2 目录读写"
 
@@ -76,7 +92,7 @@ class SeedVR2DirLoad:
                 except ImportError:
                     from comfy_execution.graph import ExecutionBlocker
                 b = ExecutionBlocker(None)
-                return (b, b, b)
+                return (b, b, b, b)
             except ImportError:
                 raise RuntimeError(f"全部 {len(files)} 张都已放大完成")
         if 自动排队 and not single and prompt:
@@ -84,7 +100,7 @@ class SeedVR2DirLoad:
             fp = fingerprint(prompt, extra_pnginfo, unique_id, ("自动排队",))
             if is_duplicate(fp, extra_pnginfo):
                 print("[SeedVR2 目录读写] 这个文件夹已经有排好的任务在队列里（重复点了运行），这次整次跳过。换了文件夹的新任务会正常排队。")
-                return blocked_outputs(3)
+                return blocked_outputs(4)
             if len(todo) > 1:
                 copies = [make_copy(prompt, extra_pnginfo, k, unique_id, {"自动排队": False}) for k in range(1, len(todo))]
                 queue_copies(copies, extra_pnginfo, "SeedVR2 目录读写", fp, prompt)
@@ -93,12 +109,12 @@ class SeedVR2DirLoad:
         img = ImageOps.exif_transpose(Image.open(f))
         if img.mode == "I":
             img = img.point(lambda i: i * (1 / 255))
-        img = img.convert("RGB")
+        img = img.convert("RGBA" if _has_alpha(img) else "RGB")
         arr = np.array(img).astype(np.float32) / 255.0
         stem = os.path.splitext(os.path.basename(f))[0]
         done_n = len(files) - len(todo) + 1
         print(f"[SeedVR2 目录读写] 第 {done_n}/{len(files)} 张：{f}")
-        return (torch.from_numpy(arr)[None,], stem + 后缀, os.path.join(os.path.dirname(f), "SeedVR2"))
+        return (torch.from_numpy(arr)[None,], stem + 后缀, os.path.join(os.path.dirname(f), "SeedVR2"), f)
 
 
 class SeedVR2DirSave:
@@ -108,27 +124,32 @@ class SeedVR2DirSave:
             "图像": ("IMAGE",),
             "文件名": ("STRING", {"forceInput": True}),
             "输出目录": ("STRING", {"forceInput": True}),
-        }}
+        }, "optional": {
+            "输出设置": (OUTPUT_TYPE, {"tooltip": "连「输出设置」。不连时和以前一样存 PNG、不写元数据。"}),
+            "源文件": ("STRING", {"forceInput": True, "tooltip": "连读图节点的 源文件（用来保留原图 ICC/EXIF）"}),
+        }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}}
 
     RETURN_TYPES = ()
     OUTPUT_NODE = True
     FUNCTION = "save"
     CATEGORY = "SeedVR2 目录读写"
 
-    def save(self, 图像, 文件名, 输出目录):
+    def save(self, 图像, 文件名, 输出目录, 输出设置=None, 源文件=None, prompt=None, extra_pnginfo=None):
+        settings = dict(legacy_settings())
+        settings.update(输出设置 or {})
+        ext = EXTENSIONS.get(settings["格式"], ".png")
         os.makedirs(输出目录, exist_ok=True)
         ui = []
         for i, im in enumerate(图像):
-            arr = np.clip(im.cpu().numpy() * 255.0, 0, 255).astype(np.uint8)
-            pil = Image.fromarray(arr)
+            pil = to_pil(im, settings["格式"])
             stem = 文件名 + (f"_{i+1}" if len(图像) > 1 else "")
-            path = os.path.join(输出目录, stem + ".png")
+            path = os.path.join(输出目录, stem + ext)
             n = 1
             while os.path.exists(path):
-                path = os.path.join(输出目录, f"{stem}_{n:03d}.png")
+                path = os.path.join(输出目录, f"{stem}_{n:03d}{ext}")
                 n += 1
-            pil.save(path, compress_level=4)
-            print(f"[SeedVR2 目录读写] 已保存 {path}")
+            save_image(pil, path, settings, 源文件, prompt, extra_pnginfo)
+            print(f"{TAG} 已保存 {path}（{pil.width}x{pil.height}）")
             try:
                 import folder_paths
                 tmp = folder_paths.get_temp_directory()

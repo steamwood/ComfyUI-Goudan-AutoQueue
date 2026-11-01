@@ -9,6 +9,23 @@
   「日期」默认 `%date:yyyy-MM-dd%`，在点运行那一刻确定，整批自动排队的副本都用同一个日期，跑过零点也不会分到两个文件夹；也可以直接写固定文字当文件夹名。
 - **SeedVR2 按路径读图（逐张，自动排队）** `SeedVR2DirLoad` + **SeedVR2 保存到原目录/SeedVR2** `SeedVR2DirSave`
   粘贴任意文件夹或单张图片路径，逐张放大，结果存到 `<原目录>/SeedVR2/`，保留原文件名并加后缀；已放大的自动跳过，可断点续跑。
+- **缩放设置** `GoudanScaleSettings`（1.1.0 新增）
+  - 「模式」选 **倍数** 或 **长边**，用不到的那一项会自动变灰。
+  - **倍数**：默认 1.5，最小 1。1 倍就是同尺寸只做修复。最终尺寸 = 原图 × 倍数（四舍五入）。
+  - **长边像素**：默认 3840，按原图比例缩放，最终长边正好等于这个数，短边四舍五入。
+  - 目标比原图小的时候，SeedVR2 按 1 倍只做修复，然后用 lanczos 缩小到目标尺寸。
+  - 打开「缩小时跳过SeedVR2（只缩放）」后，需要缩小的图完全不跑 SeedVR2，只做 lanczos 缩小，很快。放大的图不受这个开关影响。
+  - SeedVR2 处理尺寸会向上对齐到 8 的倍数，最后再精确缩放到目标尺寸，所以输出尺寸是准确的。
+- **输出设置** `GoudanOutputSettings`（1.1.0 新增）
+  - 「格式」可选 jpg / png / webp，默认 jpg。
+  - 「质量」1–100，默认 95，对 jpg 和 webp 有效。png 是无损的，这一项会变灰。
+  - jpg 不支持透明，透明部分会铺成白底。png 和 webp 会保留透明。
+  - 「保留元数据」默认关：
+    - 关：不写 ComfyUI 的工作流和提示词，也不带原图的 EXIF、GPS、XMP，不会泄露位置或相机信息。只有原图用的是 sRGB 以外的色彩配置（比如 Adobe RGB）时才保留它的 ICC，否则颜色会变。
+    - 开：写入 ComfyUI 的工作流，图片拖回 ComfyUI 就能打开。png 写在文本块里，jpg 和 webp 按 ComfyUI 的方式写在 EXIF 里。同时保留原图的 EXIF（拍摄时间、GPS 等）和 ICC。方向统一改成 1，因为像素已经转正。
+  - 没连「输出设置」的旧工作流照旧保存为无元数据的 png。
+- **SeedVR2 前缩放** `GoudanScalePrepare` 和 **最终尺寸** `GoudanScaleFinish`
+  - 处理区内部用的两个节点，按「缩放设置」工作，平时不用动。
 
 ## 安装
 ComfyUI Manager → Install via Git URL，填 `https://github.com/steamwood/ComfyUI-Goudan-AutoQueue.git`；或手动：
@@ -19,6 +36,8 @@ git clone https://github.com/steamwood/ComfyUI-Goudan-AutoQueue.git
 ```
 
 重启 ComfyUI。无额外依赖。示例工作流在 `example_workflows/`。
+- `seedvr2_upscale_standalone_v2.json`：1.1.0 新版。左上「用户操作区」里只有路径、缩放设置、输出设置三个节点，其余都在「处理区（勿改）」。
+- `seedvr2_upscale_standalone.json`：旧版，仍然能用。
 
 ## 注意
 - 一批没跑完时可以改提示词/模型/LoRA/轮数/文件夹再点运行，新的一整批会排在上一批后面，按顺序跑完。
@@ -26,3 +45,5 @@ git clone https://github.com/steamwood/ComfyUI-Goudan-AutoQueue.git
 - 节点上的「序号」保持 0。
 - 一次排多少都可以（条数 × 轮数 几百、上千都行）。副本直接放进 ComfyUI 队列，排完会在右上角提示排了多少个。ComfyUI 的队列面板最多只显示 200 个排队任务，超过的部分看不到，但都在队列里，会照常按顺序执行，不会丢。
 - 「文件名/文件夹（自动）」的日期用的是运行 ComfyUI 那台电脑的时间（格式同保存图像节点的 `%date:...%`：yyyy 年、MM 月、dd 日、hh 时、mm 分、ss 秒）。
+- SeedVR2 续跑：`<原目录>/SeedVR2/` 里已经有「原文件名+后缀」的 png、jpg、jpeg 或 webp（包括 `_001` 这种重名编号）就算做完。中途换了输出格式也不会重做，自动排队的张数也会按剩下没做的算。
+- 显存：长边越大越吃显存，大致和像素数成正比。3840 长边的像素数大约是 1920 长边的 4 倍。作者没有在 16GB 显卡上实测过上限，提示爆显存（OOM）就把长边或倍数调小，或者把 VAE 编码/解码的分块调小。
