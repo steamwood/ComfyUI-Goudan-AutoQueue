@@ -327,8 +327,8 @@ def queue_copies(prompts, extra_pnginfo, tag, fp=None, prompt=None):
     return ok
 
 
-def count_items(strings):
-    """和 Impact 的 String Selector（多行模式）一样的分条规则。"""
+def split_items(strings):
+    """和 Impact 的 String Selector（多行模式）一样的分条规则（含空段）。"""
     result, cur = [], ""
     for line in strings.split("\n"):
         if line.startswith("#"):
@@ -338,7 +338,19 @@ def count_items(strings):
         cur += line + "\n"
     if cur:
         result.append(cur.strip())
-    return max(1, len(result))
+    return result
+
+
+def nonempty_index(strings):
+    """非空段在 Impact 原始分条里的下标。空段 = 去掉 # 行和空行后没有内容。"""
+    items = split_items(strings)
+    idx = [i for i, t in enumerate(items)
+           if any(l.strip() and not l.startswith("#") for l in t.split("\n"))]
+    return idx or [0]
+
+
+def count_items(strings):
+    return len(nonempty_index(strings))
 
 
 class PromptCycleAutoQueue:
@@ -356,8 +368,9 @@ class PromptCycleAutoQueue:
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"},
         }
 
-    RETURN_TYPES = ("INT", "INT")
-    RETURN_NAMES = ("序号", "条数")
+    RETURN_TYPES = ("INT", "INT", "INT")
+    RETURN_NAMES = ("序号", "条数", "选择下标")
+    OUTPUT_TOOLTIPS = ("第几次（0 起，连续），连「文件名/文件夹」的 序号", "非空提示词条数", "连 Impact String Selector 的 select：跳过空段后的原始下标")
     FUNCTION = "run"
     CATEGORY = "狗蛋工具"
 
@@ -372,20 +385,22 @@ class PromptCycleAutoQueue:
             inp = node.get("inputs", {})
             sel = inp.get("select")
             if isinstance(sel, list) and str(sel[0]) == str(my_id) and inp.get("multiline") is True and isinstance(inp.get("strings"), str):
-                return count_items(inp["strings"])
+                return nonempty_index(inp["strings"])
         raise RuntimeError("没找到连着「序号」的提示词列表节点（Impact String Selector，多行模式）")
 
     def run(self, 轮数, 自动排队, 序号, 每张随机种子=True, prompt=None, extra_pnginfo=None, unique_id=None):
-        n = self._count(prompt, unique_id)
+        idx = self._count(prompt, unique_id)
+        n = len(idx)
         total = n * 轮数
         if 自动排队 and 序号 == 0 and total > 1 and prompt:
             fp = fingerprint(prompt, extra_pnginfo, unique_id, ("序号", "自动排队"))
             if is_duplicate(fp, extra_pnginfo):
                 print("[提示词循环] 队列里已经有一套内容完全相同的任务（重复点了运行），这次整次跳过，不再出图也不再排队。"
                       "改过提示词/模型/LoRA/轮数的新任务会正常排在后面。")
-                return blocked_outputs(2)
+                return blocked_outputs(3)
             copies = [make_copy(prompt, extra_pnginfo, k, unique_id, {"序号": k, "自动排队": False}, force_random=每张随机种子) for k in range(1, total)]
             queue_copies(copies, extra_pnginfo, "提示词循环", fp, prompt)
             print(f"[提示词循环] 共 {n} 条 × {轮数} 轮 = {total} 次，已把剩下 {total - 1} 次排进队列")
         print(f"[提示词循环] 第 {序号 + 1}/{total} 次：第 {序号 % n + 1} 条，第 {序号 // n + 1} 轮")
-        return (序号, n)
+        # 序号连续（文件编号不跳号）；选择下标 = 第 序号%n 个非空段在 Impact 原始分条里的位置
+        return (序号, n, idx[序号 % n])
