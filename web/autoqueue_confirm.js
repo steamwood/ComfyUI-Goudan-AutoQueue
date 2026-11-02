@@ -15,88 +15,85 @@ function countSegments(text) {
   return Math.max(1, n);
 }
 
-function wv(node, name) {
-  const w = (node.widgets || []).find((x) => x.name === name);
-  return w ? w.value : undefined;
+// 按导出的 API 图（app.graphToPrompt 的 output）来算：子图会被展开成 "405:18" 这样的 id，
+// 绕过（bypass）的节点也已经被去掉，所以子图打包与否都一样。
+function isOutputClass(ct) {
+  const LG = window.LiteGraph || (window.comfyAPI && window.comfyAPI.litegraph && window.comfyAPI.litegraph.LiteGraph);
+  const T = LG && LG.registered_node_types && LG.registered_node_types[ct];
+  return !!(T && T.nodeData && T.nodeData.output_node);
 }
 
-function getLink(g, lid) {
-  return g.links[lid] || (g.links.get && g.links.get(lid));
+function isLink(v) {
+  return Array.isArray(v) && v.length === 2 && typeof v[0] === "string";
 }
 
-function bypassed(node) {
-  return node.mode === 2 || node.mode === 4;
-}
-
-function isOutputNode(node) {
-  const d = node.constructor && node.constructor.nodeData;
-  return !!(d && d.output_node);
-}
-
-// 开关节点当前的值：控件值，或者连进来的布尔节点的值；读不出返回 undefined（两路都算）
-function switchValue(g, node) {
-  const inp = (node.inputs || []).find((i) => i.name === "switch");
-  if (inp && inp.link != null) {
-    const l = getLink(g, inp.link);
-    const src = l && g.getNodeById(l.origin_id);
-    const v = src && src.widgets && src.widgets[0] ? src.widgets[0].value : undefined;
-    return typeof v === "boolean" ? v : undefined;
+// 开关当前的值：直接写的布尔值，或者连进来的布尔节点（只有一个常量输入）的值；读不出返回 undefined（两路都算）
+function switchValue(p, node) {
+  let v = node.inputs ? node.inputs.switch : undefined;
+  for (let i = 0; i < 4 && isLink(v); i++) {
+    const src = p[v[0]];
+    const vals = src ? Object.values(src.inputs || {}).filter((x) => typeof x !== "object" || x === null) : [];
+    v = vals.length === 1 ? vals[0] : undefined;
   }
-  const v = wv(node, "switch");
   return typeof v === "boolean" ? v : undefined;
 }
 
+function downstream(p) {
+  const m = {};
+  for (const [id, n] of Object.entries(p)) {
+    for (const [name, v] of Object.entries(n.inputs || {})) {
+      if (isLink(v)) (m[v[0]] = m[v[0]] || []).push([id, name]);
+    }
+  }
+  return m;
+}
+
 // 从 start 往下游走，开关节点只走被选中的那一路；走到输出节点（保存/预览）就算“在用”
-function reachesOutput(g, start) {
-  const seen = new Set([start.id]);
+function reachesOutput(p, down, start) {
+  const seen = new Set([start]);
   const todo = [start];
   let blocked = false;
   while (todo.length) {
-    const node = todo.pop();
-    for (const out of node.outputs || []) {
-      for (const lid of out.links || []) {
-        const l = getLink(g, lid);
-        const t = l && g.getNodeById(l.target_id);
-        if (!t || bypassed(t) || seen.has(t.id)) continue;
-        if (t.type === "ComfySwitchNode") {
-          const name = t.inputs && t.inputs[l.target_slot] ? t.inputs[l.target_slot].name : "";
-          const v = switchValue(g, t);
-          if (v !== undefined && ((name === "on_true" && !v) || (name === "on_false" && v))) { blocked = true; continue; }
-        }
-        if (isOutputNode(t)) return true;
-        seen.add(t.id);
-        todo.push(t);
+    const id = todo.pop();
+    for (const [t, name] of down[id] || []) {
+      if (seen.has(t)) continue;
+      const tn = p[t];
+      if (tn.class_type === "ComfySwitchNode") {
+        const v = switchValue(p, tn);
+        if (v !== undefined && ((name === "on_true" && !v) || (name === "on_false" && v))) { blocked = true; continue; }
       }
+      if (isOutputClass(tn.class_type)) return true;
+      seen.add(t);
+      todo.push(t);
     }
   }
   // 没碰到被关掉的分支（比如图里没有保存节点）就按老规矩算“在用”
   return !blocked;
 }
 
-function plannedRuns() {
-  const g = app.graph;
-  if (!g) return null;
-  for (const node of g._nodes || []) {
-    if (node.type !== "PromptCycleAutoQueue" || bypassed(node)) continue;
-    if (wv(node, "自动排队") !== true) continue;
-    if (!reachesOutput(g, node)) continue;
-    const rounds = Math.max(1, Number(wv(node, "轮数")) || 1);
+async function plannedRuns() {
+  if (!app.graph) return null;
+  const p = (await app.graphToPrompt()).output || {};
+  const down = downstream(p);
+  for (const [id, n] of Object.entries(p)) {
+    if (n.class_type !== "PromptCycleAutoQueue") continue;
+    const inp = n.inputs || {};
+    if (inp["自动排队"] !== true) continue;
+    if (!reachesOutput(p, down, id)) continue;
+    const rounds = Math.max(1, Number(inp["轮数"]) || 1);
     let segs = 1;
-    for (const out of node.outputs || []) {
-      for (const lid of out.links || []) {
-        const link = getLink(g, lid);
-        const t = link && g.getNodeById(link.target_id);
-        if (t && t.type === "ImpactStringSelector") segs = countSegments(wv(t, "strings"));
-      }
+    for (const [t] of down[id] || []) {
+      if (p[t].class_type === "ImpactStringSelector") segs = countSegments(p[t].inputs.strings);
     }
     return { kind: "prompt", segs, rounds, total: segs * rounds };
   }
-  for (const node of g._nodes || []) {
-    if (node.type !== "SeedVR2DirLoad" || bypassed(node)) continue;
-    if (!reachesOutput(g, node)) continue;
-    const path = String(wv(node, "路径") || "").trim().replace(/^["']|["']$/g, "");
+  for (const [id, n] of Object.entries(p)) {
+    if (n.class_type !== "SeedVR2DirLoad") continue;
+    if (!reachesOutput(p, down, id)) continue;
+    const inp = n.inputs || {};
+    const path = String(inp["路径"] || "").trim().replace(/^["']|["']$/g, "");
     if (!path || IMAGE_EXT.test(path)) return { kind: "upscale", folder: false, path, total: path ? 1 : 0 };
-    return { kind: "upscale", folder: true, path, auto: wv(node, "自动排队") === true };
+    return { kind: "upscale", folder: true, path, auto: inp["自动排队"] === true };
   }
   return null;
 }
@@ -116,7 +113,7 @@ app.registerExtension({
     const orig = app.queuePrompt.bind(app);
     app.queuePrompt = async function (number, batchCount, ...rest) {
       try {
-        const p = plannedRuns();
+        const p = await plannedRuns();
         if (p && (p.folder || (p.kind === "prompt" && p.total > 1))) {
           if (!window.confirm(confirmText(p))) return false;
         }

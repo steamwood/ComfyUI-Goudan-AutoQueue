@@ -21,14 +21,29 @@ _lock = threading.Lock()
 
 
 def _titles(extra_pnginfo):
+    """节点标题表。子图里的节点按执行 id（如 "405:18"）登记，嵌套最多 3 层。"""
     out = {}
     try:
-        for n in (extra_pnginfo or {}).get("workflow", {}).get("nodes", []):
-            if n.get("title"):
-                out[str(n.get("id"))] = n["title"]
-    except AttributeError:
+        wf = (extra_pnginfo or {}).get("workflow", {}) or {}
+        defs = {d.get("id"): d for d in (wf.get("definitions", {}) or {}).get("subgraphs", []) or []}
+
+        def walk(nodes, prefix, depth):
+            for n in nodes or []:
+                nid = prefix + str(n.get("id"))
+                if n.get("title"):
+                    out[nid] = n["title"]
+                sub = defs.get(n.get("type"))
+                if sub and depth < 3:
+                    walk(sub.get("nodes"), nid + ":", depth + 1)
+
+        walk(wf.get("nodes", []), "", 0)
+    except (AttributeError, TypeError):
         pass
     return out
+
+
+def _id_key(x):
+    return tuple(int(p) if p.isdigit() else 0 for p in str(x).split(":"))
 
 
 def _is_link(v):
@@ -82,7 +97,7 @@ def collect(prompt, unique_id, extra_pnginfo):
     titles = _titles(extra_pnginfo)
     ids = upstream(prompt, unique_id)
     models, loras, samplers, seeds, others = [], [], [], [], []
-    for nid in sorted(ids, key=lambda x: int(x) if x.isdigit() else 0):
+    for nid in sorted(ids, key=_id_key):
         node = prompt[nid]
         ct = node.get("class_type", "")
         inp = node.get("inputs", {})
