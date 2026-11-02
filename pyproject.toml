@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-goudan-autoqueue"
 description = "Prompt cycling with auto prompt count and auto queue; SeedVR2 per-image folder upscaling saved next to the source (with native folder/image picker buttons), scale/long-edge settings, jpg/png/webp output settings, and a Save Image node that follows the output settings. Writes a per-date 还原记录.csv (one row per saved image: file, real prompt, seed, models, LoRAs, sampler settings)."
-version = "1.2.7"
+version = "1.2.8"
 license = { text = "MIT" }
 dependencies = []
 

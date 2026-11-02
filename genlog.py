@@ -12,7 +12,9 @@ import threading
 FILE_NAME = "还原记录.csv"
 COLUMNS = ("文件", "时间", "保存节点", "段/轮", "实际提示词", "种子", "模型", "LoRA", "采样设置", "其他设置", "尺寸", "源文件")
 SAMPLER_KEYS = ("seed", "noise_seed", "steps", "cfg", "sampler_name", "scheduler", "denoise", "start_at_step", "end_at_step", "upscale_by")
-SETTING_CLASSES = ("GoudanScaleSettings", "SeedVR2PostProcessing", "ImageSmartSharpen+", "LatentUpscaleBy", "ResolutionSelector")
+SETTING_CLASSES = ("GoudanScaleSettings", "SeedVR2PostProcessing", "ImageSmartSharpen+", "LatentUpscaleBy", "ResolutionSelector",
+                   "TESpeedVOSR2Loader", "TESpeedVOSR2Settings", "TESpeedVOSR2Image",
+                   "ColorMatchV2", "ColorMatch", "easy imageColorMatch")
 _lock = threading.Lock()
 
 
@@ -86,6 +88,10 @@ def collect(prompt, unique_id, extra_pnginfo):
                 if k.lower().startswith("lora_") and isinstance(v, dict) and v.get("on") and v.get("lora"):
                     loras.append(f"{v['lora']} : {_fmt(v.get('strength', 1))}")
             continue
+        if ct in SETTING_CLASSES:
+            vals = [f"{k}={_fmt(v)}" for k, v in inp.items() if not _is_link(v) and not isinstance(v, dict)]
+            others.append(f"{name}: " + " ".join(vals))
+            continue
         if "Loader" in ct or "LoraLoader" in ct:
             for k, v in inp.items():
                 if k.endswith("_name") and isinstance(v, str):
@@ -105,9 +111,6 @@ def collect(prompt, unique_id, extra_pnginfo):
                             seeds.append(f"{name}: {val}")
             samplers.append(f"[{nid}] {name}: " + " ".join(parts))
             continue
-        if ct in SETTING_CLASSES:
-            vals = [f"{k}={_fmt(v)}" for k, v in inp.items() if not _is_link(v) and not isinstance(v, dict)]
-            others.append(f"{name}: " + " ".join(vals))
     return {"模型": "\n".join(models), "LoRA": "\n".join(loras), "采样设置": "\n".join(samplers),
             "种子": "\n".join(seeds), "其他设置": "\n".join(others)}
 
