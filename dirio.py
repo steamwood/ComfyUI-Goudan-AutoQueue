@@ -131,7 +131,9 @@ class SeedVR2DirSave:
             "还原记录": ("BOOLEAN", {"default": False, "tooltip": "开：每保存一张图，在日期文件夹（只放大时是输出目录）的「还原记录.csv」追加一行：文件名、实际提示词、种子、模型、LoRA、采样设置等。默认关，关着什么都不写。"}),
         }, "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}
 
-    RETURN_TYPES = ()
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("图像",)
+    OUTPUT_TOOLTIPS = ("原样输出输入的图像（存完才输出，可以用来让后面的步骤等它存完再跑）",)
     OUTPUT_NODE = True
     FUNCTION = "save"
     CATEGORY = "SeedVR2 目录读写"
@@ -168,4 +170,4 @@ class SeedVR2DirSave:
         from .genlog import write_records
         if 还原记录:
             write_records(输出目录, [f for f, _ in saved], [s for _, s in saved], prompt, unique_id, extra_pnginfo, 实际提示词, 源文件)
-        return {"ui": {"images": ui}}
+        return {"ui": {"images": ui}, "result": (图像,)}

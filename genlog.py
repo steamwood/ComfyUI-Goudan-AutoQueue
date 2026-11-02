@@ -15,6 +15,8 @@ SAMPLER_KEYS = ("seed", "noise_seed", "steps", "cfg", "sampler_name", "scheduler
 SETTING_CLASSES = ("GoudanScaleSettings", "SeedVR2PostProcessing", "ImageSmartSharpen+", "LatentUpscaleBy", "ResolutionSelector",
                    "TESpeedVOSR2Loader", "TESpeedVOSR2Settings", "TESpeedVOSR2Image",
                    "ColorMatchV2", "ColorMatch", "easy imageColorMatch")
+# 只用来排执行顺序的输入（不是图像来源），还原记录不往这些输入的上游追
+ORDER_ONLY = {"VRAM_Debug": ("any_input",)}
 _lock = threading.Lock()
 
 
@@ -58,6 +60,8 @@ def upstream(prompt, start):
         node = prompt[nid]
         inp = node.get("inputs", {})
         keys = list(inp)
+        if node.get("class_type") in ORDER_ONLY:
+            keys = [k for k in keys if k not in ORDER_ONLY[node["class_type"]]]
         if node.get("class_type") == "ComfySwitchNode":
             sw = _literal(prompt, inp.get("switch"))
             if isinstance(sw, bool):
