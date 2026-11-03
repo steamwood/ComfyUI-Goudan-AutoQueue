@@ -82,8 +82,15 @@ function activeNodes(p, down, type) {
     .sort((a, b) => (idKey(a[0]) < idKey(b[0]) ? -1 : 1));
 }
 
-function relayLines(text) {
-  return String(text || "").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")).length;
+// 1.2.9 的旧分段接力节点：控件是 [段数, 轮数, 项目基名, 分段提示词(每行一段), 种子模式, 自动排队, 序号, 批次]。
+// 1.2.10 起和提示词循环一样用 # 分段，段数自动算。加载旧工作流时把每行一段改写成 # 分段，值按新顺序放好。
+const OLD_SEED = ["每轮随机（同一轮各段同种子）", "每轮递增（同一轮各段同种子）", "不改种子"];
+export function upgradeRelayValues(v) {
+  if (!Array.isArray(v) || v.length < 7 || typeof v[0] !== "number" || !OLD_SEED.includes(v[4])) return null;
+  const [want, rounds, base, text, seed, auto] = v;
+  let lines = String(text || "").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  if (want > 0) lines = lines.slice(0, want);
+  return [rounds, auto, 0, base, lines.map((l) => "#\n" + l).join("\n"), seed !== OLD_SEED[2], "", ""];
 }
 
 async function plannedRuns() {
@@ -94,8 +101,7 @@ async function plannedRuns() {
   if (relay) {
     const inp = relay[1].inputs || {};
     const rounds = Math.max(1, Number(inp["轮数"]) || 1);
-    const want = Number(inp["段数"]) || 0;
-    const segs = Math.max(1, want > 0 ? want : relayLines(inp["分段提示词"]));
+    const segs = countSegments(inp["分段提示词"]);  // 和提示词循环同一套 # 分段规则
     return { kind: "relay", segs, rounds, total: segs * rounds };
   }
   const cyc = activeNodes(p, down, "PromptCycleAutoQueue");
@@ -139,6 +145,17 @@ function confirmText(p, batch) {
 
 app.registerExtension({
   name: "Goudan.AutoQueue.Confirm",
+  loadedGraphNode(node) {
+    if (node.type !== "GoudanSegmentRelay") return;
+    const nv = upgradeRelayValues(node.widgets_values);
+    if (!nv) return;
+    for (const w of node.widgets || []) {
+      const i = ["轮数", "自动排队", "序号", "项目基名", "分段提示词", "每轮随机种子", "全局触发词", "批次"].indexOf(w.name);
+      if (i >= 0) w.value = nv[i];
+    }
+    node.widgets_values = nv;
+    console.info("[狗蛋自动排队] 旧版分段接力节点已改成 # 分段写法");
+  },
   setup() {
     const orig = app.queuePrompt;
     app.queuePrompt = async function (number, batchCount, ...rest) {
