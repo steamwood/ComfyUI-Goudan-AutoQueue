@@ -14,6 +14,7 @@ import datetime
 import json
 import os
 import random
+import re
 import uuid
 
 from . import autoqueue as aq
@@ -27,10 +28,22 @@ SEED_MODES = ("每轮随机（同一轮各段同种子）", "每轮递增（同�
 TAG = "分段接力"
 
 
+DASH_SEP = re.compile(r"-{3,}")
+
+
+def is_sep(line):
+    """分段行：和提示词循环一样以 # 开头；或者单独一行 ---（三个以上减号，MiniMaxH3-Easy 提示词优化输出的分段）。"""
+    return line.startswith("#") or bool(DASH_SEP.fullmatch(line.strip()))
+
+
+def _dash_to_hash(text):
+    return "\n".join("#" if not l.startswith("#") and is_sep(l) else l for l in text.split("\n"))
+
+
 def split_prompts(text):
-    """和「提示词循环」一样的分段：用 autoqueue.split_items / nonempty_index（# 行分段、空段跳过）。
-    返回每个非空段的正文（# 行本身不进提示词）。全空返回 []。"""
-    text = str(text or "")
+    """和「提示词循环」一样的分段：用 autoqueue.split_items / nonempty_index（# 行分段、空段跳过），
+    另外单独一行 --- 也算分段。返回每个非空段的正文（分段行本身不进提示词）。全空返回 []。"""
+    text = _dash_to_hash(str(text or ""))
     if not any(l.strip() and not l.startswith("#") for l in text.split("\n")):
         return []
     items = aq.split_items(text)
@@ -83,7 +96,7 @@ def _h3_trigger_seg(lines, trigger):
         for j in range(i + 1, len(lines)):  # 字段名单独一行：加在下一行正文前
             b = lines[j].lstrip()
             if b.strip():
-                if not b.startswith("#") and not aq._starts_with_word(b, trigger):
+                if not is_sep(lines[j]) and not aq._starts_with_word(b, trigger):
                     lines[j] = lines[j][:len(lines[j]) - len(b)] + trigger + sep + b
                 return lines
         return lines
@@ -106,7 +119,7 @@ def add_trigger(text, trigger):
             out.extend(aq.prepend_trigger("#\n" + "\n".join(seg), trigger).split("\n")[1:])
         seg.clear()
     for line in text.split("\n"):
-        if line.startswith("#"):
+        if is_sep(line):
             flush()
             out.append(line)
         else:
@@ -308,7 +321,7 @@ class GoudanSegmentRelay:
                 "序号": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1, "tooltip": "自动管理，保持 0 即可"}),
                 "项目基名": ("STRING", {"default": "H3长视频", "tooltip": "每轮的项目名 = 基名_r01_批次时间。连 Picker 和 Saver 的 project_name"}),
                 "分段提示词": ("STRING", {"multiline": True, "default": "#\n第 1 段提示词\n#\n第 2 段提示词",
-                                     "tooltip": "和文生图的提示词列表一样：用单独一行 # 分段（一段可以写多行，空段跳过），段数自动 = 非空段数；"
+                                     "tooltip": "和文生图的提示词列表一样：用单独一行 # 分段（也认单独一行 ---；一段可以写多行，空段跳过），段数自动 = 非空段数；"
                                                 "{a|b|c} 或 __列表名__ 随机（需要 Impact Pack）"}),
             },
             "optional": {

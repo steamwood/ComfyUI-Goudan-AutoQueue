@@ -5,10 +5,10 @@ import { app } from "../../scripts/app.js";
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|bmp|tiff?|gif)$/i;
 
-function countSegments(text) {
+function countSegments(text, dash = false) {
   let n = 0, cur = false;
   for (const line of String(text || "").split("\n")) {
-    if (line.startsWith("#")) { if (cur) n++; cur = false; }
+    if (line.startsWith("#") || (dash && /^-{3,}$/.test(line.trim()))) { if (cur) n++; cur = false; }
     else if (line.trim()) cur = true;
   }
   if (cur) n++;
@@ -101,7 +101,7 @@ async function plannedRuns() {
   if (relay) {
     const inp = relay[1].inputs || {};
     const rounds = Math.max(1, Number(inp["轮数"]) || 1);
-    const segs = countSegments(inp["分段提示词"]);  // 和提示词循环同一套 # 分段规则
+    const segs = countSegments(inp["分段提示词"], true);  // 和提示词循环同一套 # 分段规则，另外认单独一行 ---
     return { kind: "relay", segs, rounds, total: segs * rounds };
   }
   const cyc = activeNodes(p, down, "PromptCycleAutoQueue");

@@ -38,9 +38,9 @@
   - 不连「输出设置」时和自带保存图像完全一样：png、写入工作流。前缀里可以写 `%date:yyyy-MM-dd%`。
 - **分段接力排队（MiniMax H3 长视频）** `GoudanSegmentRelay`（1.2.9 新增，1.2.10 起写法和「提示词循环」统一）
   - 配合 ClipStream 的「读取片段 / 保存片段」节点做长视频：点一次运行，按「轮 → 段」的顺序排好所有任务（例如 4 段 × 3 轮 = 12 个），每段接着上一段的结尾生成。
-  - 「分段提示词」的写法和文生图的提示词列表完全一样：用单独一行 `#` 分段，一段可以写多行，空段自动跳过；段数自动 = 非空段数，只需要填「轮数」。没有 `#` 行时整个框算 1 段。
+  - 「分段提示词」的写法和文生图的提示词列表完全一样：用单独一行 `#` 分段，一段可以写多行，空段自动跳过；段数自动 = 非空段数，只需要填「轮数」。没有分段行时整个框算 1 段。另外也认单独一行 `---`（三个及以上减号，前后空格不算），MiniMaxH3-Easy「提示词优化」输出的多段提示词可以直接粘进来；`#` 和 `---` 可以混用，分段行本身不进提示词。（只有分段接力认 `---`，文生图的提示词循环不变。）
   - 「全局触发词」可空，填了加在每一段最前面（在随机变量展开之前，不会重复加）；`{a|b|c}`、`__列表名__` 随机变量和文生图一样由 Impact Pack 展开（没装 Impact 就按原文）。
-  - 兼容 MiniMax 官方 [h3-prompt-writing](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing) 写法：官方提示词（`integrated_multimodal_description:` / `overall_soundscape:` / `non_diegetic_music:`，或全参考的 `subject_definitions:` … `detailed_description:` …）整段原样粘进一段即可，字段名、空行、`[Shot 2] At 00:03.500`、`(S1)`、`<d>[English] …</d>`、`<Picture 1>` 都原样保留；多段之间照样用单独一行 `#` 分隔。官方写法的段，全局触发词加在画面描述字段的正文开头，不会插到首行对齐说明或字段名前面。
+  - 兼容 MiniMax 官方 [h3-prompt-writing](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing) 写法：官方提示词（`integrated_multimodal_description:` / `overall_soundscape:` / `non_diegetic_music:`，或全参考的 `subject_definitions:` … `detailed_description:` …）整段原样粘进一段即可，字段名、空行、`[Shot 2] At 00:03.500`、`(S1)`、`<d>[English] …</d>`、`<Picture 1>` 都原样保留；多段之间用单独一行 `#` 或 `---` 分隔。官方写法的段，全局触发词加在画面描述字段的正文开头，不会插到首行对齐说明或字段名前面。
   - 输出「项目名」连读取片段和保存片段的 project_name，「本段提示词」（已加触发词、已展开）连生成节点和保存片段的 prompt。
   - 每轮用一个新的项目名（基名_r01_时间），所以每轮是一条独立的长视频；第 1 段自动改成「全新开始」，后面的段自动改成「接续」，读取的片段固定为最新的那个。
   - 「每轮随机种子」开着时同一轮的各段用同一个种子，每轮换新；关掉则不改种子。
