@@ -54,6 +54,67 @@ def expand_random(text, seed):
         return text
 
 
+# MiniMax H3 官方提示词写法（MiniMax-AI/MiniMax-H3 skills/h3-prompt-writing）：
+#   基础模式：[可选首行对齐说明 + 空行] integrated_multimodal_description: … / overall_soundscape: … / non_diegetic_music: …
+#   全参考模式：subject_definitions: / summary: / retention_analysis: / detailed_description: / … 字段名单独一行
+# 官方要求对齐说明是第一行、字段名原样保留，所以触发词不能加在段首，要加在「画面描述」字段的正文开头。
+H3_BODY_FIELDS = ("integrated_multimodal_description:", "detailed_description:")
+
+
+def is_h3_official(seg):
+    """这一段是不是 H3 官方结构化写法（有画面描述字段名）。"""
+    return any(l.lstrip().startswith(H3_BODY_FIELDS) for l in seg.split("\n"))
+
+
+def _h3_trigger_seg(lines, trigger):
+    """官方写法的一段：触发词加到 integrated_multimodal_description / detailed_description 正文最前面。"""
+    sep = aq._trigger_sep(trigger)
+    for i, line in enumerate(lines):
+        body = line.lstrip()
+        f = next((f for f in H3_BODY_FIELDS if body.startswith(f)), None)
+        if not f:
+            continue
+        rest = body[len(f):]
+        if rest.strip():  # 字段名和正文在同一行
+            txt = rest.lstrip()
+            if not aq._starts_with_word(txt, trigger):
+                lines[i] = line[:len(line) - len(body)] + f + rest[:len(rest) - len(txt)] + trigger + sep + txt
+            return lines
+        for j in range(i + 1, len(lines)):  # 字段名单独一行：加在下一行正文前
+            b = lines[j].lstrip()
+            if b.strip():
+                if not b.startswith("#") and not aq._starts_with_word(b, trigger):
+                    lines[j] = lines[j][:len(lines[j]) - len(b)] + trigger + sep + b
+                return lines
+        return lines
+    return lines
+
+
+def add_trigger(text, trigger):
+    """和提示词循环一样给每段加触发词；H3 官方写法的段加在画面描述字段里，不破坏首行对齐说明和字段名。"""
+    trigger = (trigger or "").strip().rstrip(",，、;；").strip()
+    if not trigger or not isinstance(text, str):
+        return text
+    out, seg = [], []
+
+    def flush():
+        if not seg:
+            return
+        if is_h3_official("\n".join(seg)):
+            out.extend(_h3_trigger_seg(seg[:], trigger))
+        else:
+            out.extend(aq.prepend_trigger("#\n" + "\n".join(seg), trigger).split("\n")[1:])
+        seg.clear()
+    for line in text.split("\n"):
+        if line.startswith("#"):
+            flush()
+            out.append(line)
+        else:
+            seg.append(line)
+    flush()
+    return "\n".join(out)
+
+
 def sanitize(name):
     """和 ClipStream 一样的文件夹名规则（只留字母数字、_、-、空格）。"""
     safe = "".join(c for c in (name or "Default_Project") if c.isalnum() or c in ("_", "-", " ")).strip()
@@ -181,7 +242,7 @@ def on_prompt(json_data):
                 upgrade_legacy(inp)
                 trig = inp.get(aq.TRIGGER_KEY)
                 if isinstance(trig, str) and trig.strip() and isinstance(inp.get("分段提示词"), str):
-                    inp["分段提示词"] = aq.prepend_trigger(inp["分段提示词"], trig)  # 和提示词循环一样：点运行时加一次，副本不重复加
+                    inp["分段提示词"] = add_trigger(inp["分段提示词"], trig)  # 和提示词循环一样：点运行时加一次，副本不重复加
                     inp[aq.TRIGGER_KEY] = ""
                 if not inp.get("批次"):
                     inp["批次"] = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -273,7 +334,7 @@ class GoudanSegmentRelay:
             prompt=None, extra_pnginfo=None, unique_id=None, **_ignored):
         inp = {"分段提示词": 分段提示词}
         if 全局触发词 and 全局触发词.strip():  # 直接调用（没经过点运行处理）时也加上
-            inp["分段提示词"] = aq.prepend_trigger(分段提示词, 全局触发词)
+            inp["分段提示词"] = add_trigger(分段提示词, 全局触发词)
         segs = segment_list(inp)
         if not segs:
             raise RuntimeError(f"[{TAG}] 「分段提示词」是空的：用单独一行 # 分段，每段写一段提示词。")
