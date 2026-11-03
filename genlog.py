@@ -8,6 +8,7 @@ import datetime
 import io
 import os
 import threading
+import time
 
 FILE_NAME = "还原记录.csv"
 COLUMNS = ("文件", "时间", "保存节点", "段/轮", "实际提示词", "种子", "模型", "LoRA", "采样设置", "其他设置", "尺寸", "源文件")
@@ -164,24 +165,110 @@ def record_dir_for_output(subfolder, out_dir):
     return os.path.join(out_dir, first) if first else out_dir
 
 
-def append(record_dir, rows):
-    """往 record_dir/还原记录.csv 追加几行（加锁，新文件先写 BOM 和表头）。"""
-    if not rows:
+PENDING_NAME = "还原记录_待合并.csv"
+FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(v):
+    """以 = + - @ 开头的文字 Excel 会当公式执行，前面加 ' 让它按文字显示。"""
+    v = "" if v is None else str(v)
+    return "'" + v if v.startswith(FORMULA_START) else v
+
+
+def _proc_lock(f):
+    """进程间锁（同一文件夹可能被几个 ComfyUI 同时写）。拿不到锁不影响写入。"""
+    try:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        return True
+    except Exception:
+        return False
+
+
+def _proc_unlock(f):
+    try:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass
+
+
+def _write_rows(path, body):
+    with open(path, "a", encoding="utf-8", newline="") as f:
+        locked = _proc_lock(f)
+        try:
+            f.seek(0, os.SEEK_END)
+            if f.tell() == 0:
+                head = io.StringIO()
+                csv.writer(head).writerow(COLUMNS)
+                f.write("\ufeff" + head.getvalue())
+            f.write(body)
+            f.flush()
+        finally:
+            if locked:
+                _proc_unlock(f)
+
+
+def _merge_pending(record_dir):
+    """之前因为 CSV 被占用（例如 Excel 开着）写进「待合并」的行，主文件能写时并回去。"""
+    pend = os.path.join(record_dir, PENDING_NAME)
+    if not os.path.exists(pend):
         return
+    try:
+        with open(pend, encoding="utf-8-sig", newline="") as f:
+            rows = list(csv.reader(f))[1:]
+        if rows:
+            buf = io.StringIO()
+            csv.writer(buf).writerows(rows)
+            _write_rows(os.path.join(record_dir, FILE_NAME), buf.getvalue())
+        os.remove(pend)
+        print(f"[还原记录] 已把 {len(rows)} 行待合并记录并回 {FILE_NAME}")
+    except OSError:
+        pass  # 主文件还被占用，下次再并
+
+
+def append(record_dir, rows, retries=3, wait=0.5):
+    """往 record_dir/还原记录.csv 追加几行（进程内 + 进程间加锁，新文件先写 BOM 和表头）。
+    文件被占用（Windows 上 Excel 打开着）时重试几次；仍失败就写进「还原记录_待合并.csv」，不丢行，
+    以后主文件能写时自动并回去。返回实际写入的文件路径。"""
+    if not rows:
+        return None
     path = os.path.join(record_dir, FILE_NAME)
     buf = io.StringIO()
     w = csv.writer(buf)
     for r in rows:
-        w.writerow([r.get(c, "") for c in COLUMNS])
+        w.writerow([_safe_cell(r.get(c, "")) for c in COLUMNS])
+    body = buf.getvalue()
     with _lock:
         os.makedirs(record_dir, exist_ok=True)
-        new = not os.path.exists(path) or os.path.getsize(path) == 0
-        with open(path, "a", encoding="utf-8", newline="") as f:
-            if new:
-                head = io.StringIO()
-                csv.writer(head).writerow(COLUMNS)
-                f.write("\ufeff" + head.getvalue())
-            f.write(buf.getvalue())
+        err = None
+        for i in range(retries):
+            try:
+                _write_rows(path, body)
+                _merge_pending(record_dir)
+                return path
+            except OSError as e:
+                err = e
+                time.sleep(wait)
+        pend = os.path.join(record_dir, PENDING_NAME)
+        try:
+            _write_rows(pend, body)
+            print(f"[还原记录] {FILE_NAME} 被占用（{err}；可能在 Excel 里开着），这 {len(rows)} 行先写进 {PENDING_NAME}，"
+                  "关掉 Excel 后下次保存会自动并回去。")
+            return pend
+        except OSError as e2:
+            print(f"[还原记录] 写入失败，这 {len(rows)} 行没有记下（不影响保存）：{e2}")
+            return None
 
 
 def write_records(record_dir, files, sizes, prompt, unique_id, extra_pnginfo, text=None, source=None):

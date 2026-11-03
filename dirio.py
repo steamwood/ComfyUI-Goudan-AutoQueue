@@ -53,7 +53,12 @@ def _done_names(out_dir):
 
 def _done(out_dir, stem, suffix, cache=None):
     """输出目录里已经有「原文件名+后缀」的结果（png/jpg/jpeg/webp 任意一种，含 _001 这类重名编号）就算做完。"""
-    names = cache.setdefault(out_dir, _done_names(out_dir)) if cache is not None else _done_names(out_dir)
+    if cache is None:
+        names = _done_names(out_dir)
+    else:
+        if out_dir not in cache:  # 注意不能用 setdefault(out_dir, _done_names(...))：那样每次都会先列一遍目录
+            cache[out_dir] = _done_names(out_dir)
+        names = cache[out_dir]
     return (stem + suffix).lower() in names
 
 
@@ -112,8 +117,8 @@ class SeedVR2DirLoad:
                 print("[SeedVR2 目录读写] 这个文件夹已经有排好的任务在队列里（重复点了运行），这次整次跳过。换了文件夹的新任务会正常排队。")
                 return blocked_outputs(4)
             if len(todo) > 1:
-                copies = [make_copy(prompt, extra_pnginfo, k, unique_id, {"自动排队": False}) for k in range(1, len(todo))]
-                queue_copies(copies, extra_pnginfo, "SeedVR2 目录读写", fp, prompt)
+                copies = (make_copy(prompt, extra_pnginfo, k, unique_id, {"自动排队": False}) for k in range(1, len(todo)))
+                queue_copies(copies, extra_pnginfo, "SeedVR2 目录读写", fp, prompt, total=len(todo) - 1)
                 print(f"[SeedVR2 目录读写] 还剩 {len(todo)} 张，已把后面 {len(todo) - 1} 次排进队列（逐张处理）")
         f = todo[0]
         with Image.open(f) as src:  # 读完就关，Windows 上不会一直占着原图

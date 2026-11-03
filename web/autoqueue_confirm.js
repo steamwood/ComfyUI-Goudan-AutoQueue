@@ -71,21 +71,46 @@ function reachesOutput(p, down, start) {
   return !blocked;
 }
 
+function idKey(id) {
+  return String(id).split(":").map((x) => (/^\d+$/.test(x) ? Number(x).toString().padStart(12, "0") : x)).join(":");
+}
+
+// 和服务端一样：多个开着「自动排队」的提示词循环节点时只由 id 最小的那个排队
+function activeNodes(p, down, type) {
+  return Object.entries(p)
+    .filter(([id, n]) => n.class_type === type && (n.inputs || {})["自动排队"] === true && reachesOutput(p, down, id))
+    .sort((a, b) => (idKey(a[0]) < idKey(b[0]) ? -1 : 1));
+}
+
+function relayLines(text) {
+  return String(text || "").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")).length;
+}
+
 async function plannedRuns() {
   if (!app.graph) return null;
   const p = (await app.graphToPrompt()).output || {};
   const down = downstream(p);
-  for (const [id, n] of Object.entries(p)) {
-    if (n.class_type !== "PromptCycleAutoQueue") continue;
+  const relay = activeNodes(p, down, "GoudanSegmentRelay")[0];
+  if (relay) {
+    const inp = relay[1].inputs || {};
+    const rounds = Math.max(1, Number(inp["轮数"]) || 1);
+    const want = Number(inp["段数"]) || 0;
+    const segs = Math.max(1, want > 0 ? want : relayLines(inp["分段提示词"]));
+    return { kind: "relay", segs, rounds, total: segs * rounds };
+  }
+  const cyc = activeNodes(p, down, "PromptCycleAutoQueue");
+  if (cyc.length) {
+    const [id, n] = cyc[0];
     const inp = n.inputs || {};
-    if (inp["自动排队"] !== true) continue;
-    if (!reachesOutput(p, down, id)) continue;
     const rounds = Math.max(1, Number(inp["轮数"]) || 1);
     let segs = 1;
     for (const [t] of down[id] || []) {
-      if (p[t].class_type === "ImpactStringSelector") segs = countSegments(p[t].inputs.strings);
+      const sn = p[t];
+      if (sn.class_type === "ImpactStringSelector" && String((sn.inputs || {}).select && sn.inputs.select[0]) === String(id)) {
+        segs = sn.inputs.multiline === false ? Math.max(1, String(sn.inputs.strings || "").split("\n").length) : countSegments(sn.inputs.strings);
+      }
     }
-    return { kind: "prompt", segs, rounds, total: segs * rounds };
+    return { kind: "prompt", segs, rounds, total: segs * rounds, extra: cyc.length - 1 };
   }
   for (const [id, n] of Object.entries(p)) {
     if (n.class_type !== "SeedVR2DirLoad") continue;
@@ -98,13 +123,18 @@ async function plannedRuns() {
   return null;
 }
 
-function confirmText(p) {
+function confirmText(p, batch) {
+  const times = batch > 1 ? `\n（批量次数 ${batch}：上面的整套会跑 ${batch} 遍，共 ${p.total * batch} 次）` : "";
+  if (p.kind === "relay") {
+    return `分段接力：本次将运行 ${p.total} 个任务（${p.rounds} 轮 × ${p.segs} 段，按 轮→段 顺序）。${times}\n确定开始吗？`;
+  }
   if (p.kind === "upscale") {
     const how = p.auto ? "逐张自动排队，已放大过的会跳过" : "自动排队关着，只跑这一次";
     return `只放大模式：处理文件夹\n${p.path}\n里的图片（${how}；不按提示词段数 × 轮数算）。\n确定开始吗？`;
   }
   const how = p.segs > 1 ? `${p.segs} 段 × ${p.rounds} 轮` : `单张抽卡 ${p.rounds} 轮`;
-  return `本次将运行 ${p.total} 次（${how}）。\n确定开始吗？`;
+  const more = p.extra ? `\n注意：图里还有 ${p.extra} 个开着自动排队的提示词循环节点，只有 id 最小的那个会排队。` : "";
+  return `本次将运行 ${p.total} 次（${how}）。${times}${more}\n确定开始吗？`;
 }
 
 app.registerExtension({
@@ -114,8 +144,9 @@ app.registerExtension({
     app.queuePrompt = async function (number, batchCount, ...rest) {
       try {
         const p = await plannedRuns();
-        if (p && (p.folder || (p.kind === "prompt" && p.total > 1))) {
-          if (!window.confirm(confirmText(p))) return false;
+        const batch = Math.max(1, Number(batchCount) || 1);
+        if (p && (p.folder || ((p.kind === "prompt" || p.kind === "relay") && p.total * batch > 1 && p.total > 1))) {
+          if (!window.confirm(confirmText(p, batch))) return false;
         }
       } catch (e) { console.warn("[狗蛋自动排队] 运行前提示出错，照常运行", e); }
       return orig.call(app, number, batchCount, ...rest);

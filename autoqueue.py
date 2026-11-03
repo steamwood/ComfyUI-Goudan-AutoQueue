@@ -57,15 +57,28 @@ def _seed_rules(extra_pnginfo):
     return rules
 
 
-def make_copy(prompt, extra_pnginfo, k, my_id, overrides, force_random=False):
+def _queue_snapshot(srv=None):
+    """(正在跑, 排队中) 两个列表。新版 ComfyUI 有不加锁拷贝的 get_current_queue_volatile，老版只有 get_current_queue。"""
+    if srv is None:
+        from server import PromptServer
+        srv = PromptServer.instance
+    q = srv.prompt_queue
+    return (getattr(q, "get_current_queue_volatile", None) or q.get_current_queue)()
+
+
+def make_copy(prompt, extra_pnginfo, k, my_id, overrides, force_random=False, rules=None):
     p = copy.deepcopy(prompt)
     # ComfyUI 执行时会往 prompt 里写 "is_changed"（NaN）。原样带进副本会让所有副本的缓存签名相同，
     # 导致后面的副本整图命中缓存、不重新计算（放大一直停在第二张、提示词轮次重复）。必须去掉。
     for node in p.values():
         if isinstance(node, dict):
             node.pop("is_changed", None)
+    for nid, node in p.items():
+        # 图里还有别的自动排队节点（例如两个提示词循环）：副本里一律关掉，否则每个副本都会再排一整套
+        if isinstance(node, dict) and node.get("class_type") in AUTO_NODES and nid != str(my_id):
+            node.setdefault("inputs", {})["自动排队"] = False
     p[str(my_id)]["inputs"].update(overrides)
-    rules = _seed_rules(extra_pnginfo)
+    rules = dict(rules) if rules is not None else _seed_rules(extra_pnginfo)
     if force_random:
         # rgthree Seed 在排队时会把 -1 换成实际种子写进工作流，读不出“随机”模式，所以直接全部随机
         for nid, node in p.items():
@@ -122,7 +135,7 @@ def pending_copies(fp):
             return _posting[fp]
     try:
         from server import PromptServer
-        running, queued = (getattr(PromptServer.instance.prompt_queue, "get_current_queue_volatile", None) or PromptServer.instance.prompt_queue.get_current_queue)()
+        running, queued = _queue_snapshot()
         n = 0
         for item in list(queued):
             extra = item[3] if len(item) > 3 and isinstance(item[3], dict) else {}
@@ -134,14 +147,14 @@ def pending_copies(fp):
         return 0
 
 
-AUTO_NODES = {"PromptCycleAutoQueue": ("序号", "自动排队"), "SeedVR2DirLoad": ("自动排队",)}
+AUTO_NODES = {"PromptCycleAutoQueue": ("序号", "自动排队"), "SeedVR2DirLoad": ("自动排队",), "GoudanSegmentRelay": ("序号", "自动排队", "批次")}
 DUP_KEY = "goudan_autoqueue_dup"
 
 
 def _active_fps():
     """队列里（正在跑 + 排队中）所有带指纹的任务的指纹。"""
     from server import PromptServer
-    running, queued = (getattr(PromptServer.instance.prompt_queue, "get_current_queue_volatile", None) or PromptServer.instance.prompt_queue.get_current_queue)()
+    running, queued = _queue_snapshot()
     fps = set()
     for item in list(running) + list(queued):
         extra = item[3] if len(item) > 3 and isinstance(item[3], dict) else {}
@@ -159,6 +172,14 @@ def _trigger_sep(trigger):
     return "，" if any("\u4e00" <= c <= "\u9fff" for c in trigger) else ", "
 
 
+def _starts_with_word(body, trigger):
+    """正文是否已经以触发词开头（后面紧跟分隔符或结束；"cat" 不算 "catgirl" 的开头）。"""
+    if not body.startswith(trigger):
+        return False
+    rest = body[len(trigger):]
+    return not rest or rest[0] in ",，、;；:： \t" or not (rest[0].isalnum() or rest[0] == "_")
+
+
 def prepend_trigger(strings, trigger):
     """给每个非空段的第一行正文前面加上触发词（# 行、空段不动；已经以触发词开头的不重复加）。"""
     trigger = (trigger or "").strip().rstrip(",，、;；").strip()
@@ -171,7 +192,7 @@ def prepend_trigger(strings, trigger):
             need = True
         elif need and line.strip():
             body = line.lstrip()
-            if not body.startswith(trigger):
+            if not _starts_with_word(body, trigger):
                 line = line[:len(line) - len(body)] + trigger + sep + body
             need = False
         out.append(line)
@@ -208,6 +229,9 @@ def fix_random_seeds(prompt):
                 inp["seed"] = random.randint(0, 2**50)
 
 
+PRE_HOOKS = []  # 其它模块（分段接力）在算指纹之前要改 prompt 的处理函数
+
+
 def _on_prompt(json_data):
     """每次点运行（POST /prompt）时：给原始任务打上内容指纹；如果同样内容的一套还在队列里没跑完，就标记成“重复点击”。
     这样后点的那次即使排在整套副本后面才轮到，也能认出来是重复的。"""
@@ -222,6 +246,8 @@ def _on_prompt(json_data):
         except Exception as e:
             print(f"[狗蛋自动排队] 加全局触发词出错：{e}")
         fix_random_seeds(prompt)
+        for hook in PRE_HOOKS:
+            hook(json_data)
         hit = next(((nid, n["class_type"]) for nid, n in prompt.items() if isinstance(n, dict)
                     and n.get("class_type") in AUTO_NODES and n.get("inputs", {}).get("自动排队") is True), None)
         if not hit:
@@ -268,7 +294,7 @@ def _running_number(prompt):
     """当前正在跑的这次任务在队列里的编号（副本用 编号+小数 插在它后面，保证整套连续、不和后面点的任务交错）。"""
     try:
         from server import PromptServer
-        running, _ = (getattr(PromptServer.instance.prompt_queue, "get_current_queue_volatile", None) or PromptServer.instance.prompt_queue.get_current_queue)()
+        running, _ = _queue_snapshot()
         mine = [it for it in running if it[2] is prompt] or (running if len(running) == 1 else [])
         return float(mine[0][0]) if mine else None
     except Exception:
@@ -281,7 +307,7 @@ UI_QUEUE_LIMIT = 200  # 新版前端队列面板只取最新的 200 个排队任
 
 def _queue_item_len(srv):
     """这个版本 ComfyUI 队列里每一项有几个字段（新版 6 个：多了 sensitive；老版 5 个）。"""
-    running, queued = (getattr(srv.prompt_queue, "get_current_queue_volatile", None) or srv.prompt_queue.get_current_queue)()
+    running, queued = _queue_snapshot(srv)
     for item in list(running) + list(queued):
         if len(item) in (5, 6):
             return len(item)
@@ -351,7 +377,7 @@ def _queue_direct(srv, item_len, prompts, extra, numbers, tag):
             srv.prompt_queue.put(item)
             ok += 1
     except Exception as e:
-        left = len(prompts) - ok - bad
+        left = len(numbers) - ok - bad
         print(f"[{tag}] 出错：直接入队中途失败，已排进去 {ok} 个，剩下 {left} 个没有排：{e}")
         bad += left
     return ok, bad
@@ -360,7 +386,7 @@ def _queue_direct(srv, item_len, prompts, extra, numbers, tag):
 def _notify(srv, tag, ok, bad):
     """在界面右上角弹提示：排了多少个；超过 200 个时说明队列面板只显示 200 个、其余不会丢。"""
     try:
-        running, queued = (getattr(srv.prompt_queue, "get_current_queue_volatile", None) or srv.prompt_queue.get_current_queue)()
+        running, queued = _queue_snapshot(srv)
         waiting = len(queued)
         print(f"[{tag}] 已自动排队 {ok} 次（现在队列里共 {waiting} 个等待中）" + (f"，{bad} 个没排进去" if bad else ""))
         if waiting > UI_QUEUE_LIMIT:
@@ -370,13 +396,21 @@ def _notify(srv, tag, ok, bad):
         print(f"[{tag}] 已自动排队 {ok} 次（{e}）")
 
 
-def queue_copies(prompts, extra_pnginfo, tag, fp=None, prompt=None):
+BIG_TOTAL = 5000
+
+
+def queue_copies(prompts, extra_pnginfo, tag, fp=None, prompt=None, total=None):
     """把副本排进队列：编号 = 当前任务编号 + 小数，整套连续排在当前任务后面。
+    prompts 可以是生成器（边生成边入队，不会一次性把几万份深拷贝都放在内存里），这时要给 total。
     排完才返回（同步），所以不会有“还没排完就开始跑下一个”的问题，数量也没有上限。"""
     from server import PromptServer
     srv = PromptServer.instance
     base = _running_number(prompt) if prompt is not None else None
-    total = len(prompts)
+    if total is None:
+        prompts = list(prompts)
+        total = len(prompts)
+    if total > BIG_TOTAL:
+        print(f"[{tag}] 提示：这次要排 {total} 个任务，数量很大，排队需要一些时间，队列也会占用较多内存。")
     if base is not None:
         numbers = [base + i / (total + 1) for i in range(1, total + 1)]
     else:
@@ -443,6 +477,17 @@ def count_items(strings):
     return len(nonempty_index(strings))
 
 
+def _id_key(nid):
+    return [int(x) if x.isdigit() else x for x in str(nid).split(":")]
+
+
+def _first_auto_node(prompt, my_id):
+    """多个自动排队节点同时开着时，只让 id 最小的那个排队（避免排出几套互相叠加的副本）。"""
+    ids = [nid for nid, n in (prompt or {}).items() if isinstance(n, dict) and n.get("class_type") in AUTO_NODES
+           and n.get("inputs", {}).get("自动排队") is True]
+    return not ids or min(ids, key=_id_key) == str(my_id)
+
+
 class PromptCycleAutoQueue:
     @classmethod
     def INPUT_TYPES(cls):
@@ -475,9 +520,12 @@ class PromptCycleAutoQueue:
                 continue
             inp = node.get("inputs", {})
             sel = inp.get("select")
-            if isinstance(sel, list) and str(sel[0]) == str(my_id) and inp.get("multiline") is True and isinstance(inp.get("strings"), str):
+            if isinstance(sel, list) and str(sel[0]) == str(my_id) and isinstance(inp.get("strings"), str):
+                if inp.get("multiline") is False:
+                    # 非多行模式：Impact 按“每行一条”取（含空行）
+                    return list(range(max(1, len(inp["strings"].split("\n")))))
                 return nonempty_index(inp["strings"])
-        raise RuntimeError("没找到连着「序号」的提示词列表节点（Impact String Selector，多行模式）")
+        raise RuntimeError("没找到连着「选择下标」的提示词列表节点（Impact String Selector）")
 
     def run(self, 轮数, 自动排队, 序号, 每张随机种子=True, 全局触发词="", prompt=None, extra_pnginfo=None, unique_id=None):
         idx = self._count(prompt, unique_id)
@@ -489,8 +537,13 @@ class PromptCycleAutoQueue:
                 print("[提示词循环] 队列里已经有一套内容完全相同的任务（重复点了运行），这次整次跳过，不再出图也不再排队。"
                       "改过提示词/模型/LoRA/轮数的新任务会正常排在后面。")
                 return blocked_outputs(3)
-            copies = [make_copy(prompt, extra_pnginfo, k, unique_id, {"序号": k, "自动排队": False}, force_random=每张随机种子) for k in range(1, total)]
-            queue_copies(copies, extra_pnginfo, "提示词循环", fp, prompt)
+            if not _first_auto_node(prompt, unique_id):
+                print("[提示词循环] 图里有多个开着「自动排队」的提示词循环节点，只由 id 最小的那个负责排队，这个不排。")
+            else:
+                rules = _seed_rules(extra_pnginfo)
+                copies = (make_copy(prompt, extra_pnginfo, k, unique_id, {"序号": k, "自动排队": False}, force_random=每张随机种子, rules=rules)
+                          for k in range(1, total))
+                queue_copies(copies, extra_pnginfo, "提示词循环", fp, prompt, total=total - 1)
             print(f"[提示词循环] 共 {n} 条 × {轮数} 轮 = {total} 次，已把剩下 {total - 1} 次排进队列")
         print(f"[提示词循环] 第 {序号 + 1}/{total} 次：第 {序号 % n + 1} 条，第 {序号 // n + 1} 轮")
         # 序号连续（文件编号不跳号）；选择下标 = 第 序号%n 个非空段在 Impact 原始分条里的位置

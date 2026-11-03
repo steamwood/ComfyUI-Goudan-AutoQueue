@@ -118,6 +118,17 @@ def _own_addresses():
     return addrs
 
 
+PROXY_HEADERS = ("Forwarded", "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Host", "CF-Connecting-IP")
+
+
+def is_proxied(request):
+    """经过反向代理转发的请求：对方地址看起来是本机，其实可能来自别的电脑，按“不是本机”处理。"""
+    try:
+        return any(request.headers.get(h) for h in PROXY_HEADERS)
+    except Exception:
+        return False
+
+
 def _local_address(request):
     """这次连接在服务器这边的地址（aiohttp 已经有的连接信息，不新建连接）。"""
     try:
@@ -138,7 +149,7 @@ class BrowseService:
 
     async def handle(self, request):
         from aiohttp import web
-        if not is_local_address(request.remote, _local_address(request)):
+        if is_proxied(request) or not is_local_address(request.remote, _local_address(request)):
             return web.json_response({"status": "error", "error": "选择窗口只能在运行 ComfyUI 的这台电脑上用。" + PASTE_HINT}, status=403)
         data = {}
         if request.can_read_body:
