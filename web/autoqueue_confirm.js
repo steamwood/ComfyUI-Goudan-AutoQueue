@@ -110,7 +110,7 @@ function confirmText(p) {
 app.registerExtension({
   name: "Goudan.AutoQueue.Confirm",
   setup() {
-    const orig = app.queuePrompt.bind(app);
+    const orig = app.queuePrompt;
     app.queuePrompt = async function (number, batchCount, ...rest) {
       try {
         const p = await plannedRuns();
@@ -118,7 +118,7 @@ app.registerExtension({
           if (!window.confirm(confirmText(p))) return false;
         }
       } catch (e) { console.warn("[狗蛋自动排队] 运行前提示出错，照常运行", e); }
-      return orig(number, batchCount, ...rest);
+      return orig.call(app, number, batchCount, ...rest);
     };
   },
 });

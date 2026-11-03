@@ -35,17 +35,26 @@ def _collect(path):
     raise ValueError(f"路径不存在：{path}")
 
 
-def _done(out_dir, stem, suffix):
-    """输出目录里已经有「原文件名+后缀」的结果（png/jpg/jpeg/webp 任意一种，含 _001 这类重名编号）就算做完。"""
+_NUM_TAIL = re.compile(r"(_\d+)+$")
+
+
+def _done_names(out_dir):
+    """输出目录里已有结果的文件名（小写、去扩展名、去掉 _001 这类编号），只列一次目录。"""
     if not os.path.isdir(out_dir):
-        return False
-    key = (stem + suffix).lower()
-    pattern = re.compile(re.escape(key) + r"(_\d+)*")
+        return set()
+    names = set()
     for f in os.listdir(out_dir):
         name, ext = os.path.splitext(f.lower())
-        if ext in DONE_EXTS and pattern.fullmatch(name):
-            return True
-    return False
+        if ext in DONE_EXTS:
+            names.add(name)
+            names.add(_NUM_TAIL.sub("", name))
+    return names
+
+
+def _done(out_dir, stem, suffix, cache=None):
+    """输出目录里已经有「原文件名+后缀」的结果（png/jpg/jpeg/webp 任意一种，含 _001 这类重名编号）就算做完。"""
+    names = cache.setdefault(out_dir, _done_names(out_dir)) if cache is not None else _done_names(out_dir)
+    return (stem + suffix).lower() in names
 
 
 def _has_alpha(img):
@@ -80,9 +89,10 @@ class SeedVR2DirLoad:
     def load(self, 路径, 后缀, 自动排队=True, prompt=None, extra_pnginfo=None, unique_id=None):
         files = _collect(路径)
         single = len(files) == 1 and os.path.isfile(_clean(路径))
+        cache = {}
         todo = files if single else [
             f for f in files
-            if not _done(os.path.join(os.path.dirname(f), "SeedVR2"), os.path.splitext(os.path.basename(f))[0], 后缀)
+            if not _done(os.path.join(os.path.dirname(f), "SeedVR2"), os.path.splitext(os.path.basename(f))[0], 后缀, cache)
         ]
         if not todo:
             print(f"[SeedVR2 目录读写] 全部 {len(files)} 张都已放大完成，本次跳过")
@@ -106,10 +116,11 @@ class SeedVR2DirLoad:
                 queue_copies(copies, extra_pnginfo, "SeedVR2 目录读写", fp, prompt)
                 print(f"[SeedVR2 目录读写] 还剩 {len(todo)} 张，已把后面 {len(todo) - 1} 次排进队列（逐张处理）")
         f = todo[0]
-        img = ImageOps.exif_transpose(Image.open(f))
-        if img.mode == "I":
-            img = img.point(lambda i: i * (1 / 255))
-        img = img.convert("RGBA" if _has_alpha(img) else "RGB")
+        with Image.open(f) as src:  # 读完就关，Windows 上不会一直占着原图
+            img = ImageOps.exif_transpose(src)
+            if img.mode in ("I", "I;16", "I;16B", "I;16L"):
+                img = img.point(lambda i: i * (1 / 255)) if img.mode == "I" else img.convert("I").point(lambda i: i * (1 / 257))
+            img = img.convert("RGBA" if _has_alpha(img) else "RGB")
         arr = np.array(img).astype(np.float32) / 255.0
         stem = os.path.splitext(os.path.basename(f))[0]
         done_n = len(files) - len(todo) + 1

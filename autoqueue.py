@@ -14,16 +14,34 @@ from .filenames import resolve_prompt_dates
 SEED_KEYS = ("seed", "noise_seed")
 
 
-def _seed_rules(extra_pnginfo):
-    """从界面工作流里读出哪些种子是“随机/递增/递减”，返回 {节点id: (输入名, 模式)}。"""
-    rules = {}
+def _workflow_nodes(extra_pnginfo):
+    """界面工作流里的所有节点，带执行 id：子图里的节点是 "405:96" 这种（和 API 里的 id 一致），最多 3 层。"""
+    out = []
     try:
-        nodes = (extra_pnginfo or {}).get("workflow", {}).get("nodes", [])
-    except AttributeError:
-        return rules
-    for n in nodes:
+        wf = (extra_pnginfo or {}).get("workflow", {}) or {}
+        defs = {d.get("id"): d for d in (wf.get("definitions", {}) or {}).get("subgraphs", []) or []}
+
+        def walk(nodes, prefix, depth):
+            for n in nodes or []:
+                if not isinstance(n, dict):
+                    continue
+                nid = prefix + str(n.get("id"))
+                out.append((nid, n))
+                sub = defs.get(n.get("type"))
+                if sub and depth < 3:
+                    walk(sub.get("nodes"), nid + ":", depth + 1)
+
+        walk(wf.get("nodes", []), "", 0)
+    except (AttributeError, TypeError):
+        pass
+    return out
+
+
+def _seed_rules(extra_pnginfo):
+    """从界面工作流里读出哪些种子是“随机/递增/递减”，返回 {节点id: (输入名, 模式)}。子图里的节点也算。"""
+    rules = {}
+    for nid, n in _workflow_nodes(extra_pnginfo):
         wv = n.get("widgets_values")
-        nid = str(n.get("id"))
         if not isinstance(wv, list) or not wv:
             continue
         if n.get("type") == "Seed (rgthree)":
@@ -292,9 +310,6 @@ def _client_id(srv):
     """发起这次运行的页面的 client_id（ComfyUI 执行时会把当前任务的 client_id 放在 srv.client_id），
     副本任务带上它，进度/图片/文字就能显示到发起页面上。没有时为 None，ComfyUI 会发给所有打开的页面。"""
     return getattr(srv, "client_id", None) or None
-    if clients:
-        return list(clients.keys())[-1]
-    return cid
 
 
 def _queue_direct(srv, item_len, prompts, extra, numbers, tag):
