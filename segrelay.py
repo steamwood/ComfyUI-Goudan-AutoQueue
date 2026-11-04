@@ -27,7 +27,7 @@ SAVER_TYPES = ("MiniMaxClipBinSaver", "MiniMaxClipBinDualSaver")
 BIN_DIRS = ("h3-clipstream", "minimax_h3_bins")  # 新版 / 老版 ClipStream 的存放文件夹
 # 老版选项是「后续自动接力」，新版是「后续自动接续」，都按开头的英文匹配
 MODE_DEFAULTS = {"Force Initial": "Force Initial (强制新建首段，无上下文)", "Auto": "Auto (首段全新 / 后续自动接续)"}
-SEED_MODES = ("每轮随机（同一轮各段同种子）", "每轮递增（同一轮各段同种子）", "不改种子")
+SEED_MODES = ("每轮随机（同一轮各段同种子）", "每轮递增（同一轮各段同种子）", "不改种子")  # 名字沿用；接续段的种子见 seg_seed
 TAG = "分段接力"
 
 
@@ -478,10 +478,16 @@ def on_prompt(json_data):
 aq.PRE_HOOKS.append(on_prompt)  # 在自动排队算指纹之前改好（和副本入队走同一个处理）
 
 
-def round_seed_copy(p, rules, r, mode, round_seeds):
-    """同一轮各段用同一个种子：每轮随机 / 每轮递增（第 1 轮是原值）/ 不改。"""
-    if mode == SEED_MODES[2]:
-        return p
+def seg_seed(base, loc, nid, key):
+    """接续段（场景内第 2 段起）的种子：由本轮种子 + 段号确定性地派生，每段不同、可复现；场景首段原样用本轮种子。"""
+    if loc <= 0:
+        return base
+    return random.Random(f"{base}|{nid}|{key}|seg{loc}").randint(0, 2**50)
+
+
+def round_seed_copy(p, rules, r, mode, round_seeds, loc=0):
+    """每轮：随机 / 递增（第 1 轮是原值）/ 不改；再按场景内段号 loc 给接续段派生各自不同的种子
+    （同一轮各场景首段仍然同种子；「不改种子」时首段保持原值，接续段也从原值派生，所以每次跑结果一样）。"""
     for nid, node in p.items():
         if isinstance(node, dict) and node.get("class_type") == "Seed (rgthree)" and nid not in rules:
             rules[nid] = (("seed",), "randomize")
@@ -493,9 +499,10 @@ def round_seed_copy(p, rules, r, mode, round_seeds):
             v = node.get("inputs", {}).get(key)
             if isinstance(v, int) and not isinstance(v, bool):
                 if mode == SEED_MODES[0]:
-                    node["inputs"][key] = v if r == 0 else round_seeds.setdefault((r, nid, key), random.randint(0, 2**50))
-                else:
-                    node["inputs"][key] = v + r
+                    v = v if r == 0 else round_seeds.setdefault((r, nid, key), random.randint(0, 2**50))
+                elif mode == SEED_MODES[1]:
+                    v = v + r
+                node["inputs"][key] = seg_seed(v, loc, nid, key)
     return p
 
 
@@ -544,7 +551,7 @@ class GoudanSegmentRelay:
                                                 "{a|b|c} 或 __列表名__ 随机（需要 Impact Pack）"}),
             },
             "optional": {
-                "每轮随机种子": ("BOOLEAN", {"default": True, "tooltip": "开着时每一轮换新的随机种子（rgthree Seed 和采样器种子都会换），同一轮各段用同一个种子；关着时都不改"}),
+                "每轮随机种子": ("BOOLEAN", {"default": True, "tooltip": "开着时每一轮换新的随机种子（rgthree Seed 和采样器种子都会换）；关着时用工作流里的种子。不管开关，接续段（第 2 段起）都会在本轮种子上按段号派生出各自不同的种子（可复现），避免每段同一噪声叠加导致越接越糊"}),
                 "全局触发词": ("STRING", {"default": "", "tooltip": "可空。填了会自动加在每一段提示词最前面（例如 LoRA 触发词），在随机变量展开之前加，空着就什么都不加"}),
                 "批次": ("STRING", {"default": "", "tooltip": "自动管理（点运行时填成时间戳），保持空着即可"}),
             },
@@ -603,7 +610,7 @@ class GoudanSegmentRelay:
                 def gen():
                     for k in range(1, total):
                         p = aq.make_copy(prompt, extra_pnginfo, k, unique_id, {"序号": k, "自动排队": False, "批次": batch}, rules={})
-                        yield round_seed_copy(p, dict(rules), k // n, seed_mode, round_seeds)
+                        yield round_seed_copy(p, dict(rules), k // n, seed_mode, round_seeds, _local(inp["分段提示词"], k % n))
                 aq.queue_copies(gen(), extra_pnginfo, TAG, fp, prompt, total=total - 1)
                 print(f"[{TAG}] 共 {n} 段{f'（{sn} 个场景）' if sname is not None else ''} × {轮数} 轮 = {total} 个任务，"
                       f"已把剩下 {total - 1} 个按 {'轮→场景→段' if sname is not None else '轮→段'} 顺序排进队列")
