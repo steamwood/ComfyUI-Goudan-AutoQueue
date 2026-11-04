@@ -8,11 +8,23 @@ const IMAGE_EXT = /\.(png|jpe?g|webp|bmp|tiff?|gif)$/i;
 function countSegments(text, dash = false) {
   let n = 0, cur = false;
   for (const line of String(text || "").split("\n")) {
-    if (line.startsWith("#") || (dash && /^-{3,}$/.test(line.trim()))) { if (cur) n++; cur = false; }
+    if (line.startsWith("#") || (dash && /^-{3,}(\s*\d+(\.\d+)?\s*(s|S|sec|秒)?\s*)?$/.test(line.trim()))) { if (cur) n++; cur = false; }
     else if (line.trim()) cur = true;
   }
   if (cur) n++;
   return Math.max(1, n);
+}
+
+// 分段接力的 ## 场景名：返回有段的场景数（没有 ## 行返回 0）。
+function countScenes(text) {
+  const lines = String(text || "").split("\n");
+  const isScene = (l) => l.startsWith("##") && !l.startsWith("###");
+  if (!lines.some(isScene)) return 0;
+  let n = 0, cur = [];
+  const flush = () => { if (cur.some((l) => l.trim() && !l.startsWith("#") && !/^-{3,}(\s*\d+(\.\d+)?\s*(s|S|sec|秒)?\s*)?$/.test(l.trim()))) n++; cur = []; };
+  for (const l of lines) { if (isScene(l)) flush(); else cur.push(l); }
+  flush();
+  return n;
 }
 
 // 按导出的 API 图（app.graphToPrompt 的 output）来算：子图会被展开成 "405:18" 这样的 id，
@@ -102,7 +114,7 @@ async function plannedRuns() {
     const inp = relay[1].inputs || {};
     const rounds = Math.max(1, Number(inp["轮数"]) || 1);
     const segs = countSegments(inp["分段提示词"], true);  // 和提示词循环同一套 # 分段规则，另外认单独一行 ---
-    return { kind: "relay", segs, rounds, total: segs * rounds };
+    return { kind: "relay", segs, rounds, total: segs * rounds, scenes: countScenes(inp["分段提示词"]) };
   }
   const cyc = activeNodes(p, down, "PromptCycleAutoQueue");
   if (cyc.length) {
@@ -132,7 +144,7 @@ async function plannedRuns() {
 function confirmText(p, batch) {
   const times = batch > 1 ? `\n（批量次数 ${batch}：上面的整套会跑 ${batch} 遍，共 ${p.total * batch} 次）` : "";
   if (p.kind === "relay") {
-    return `分段接力：本次将运行 ${p.total} 个任务（${p.rounds} 轮 × ${p.segs} 段，按 轮→段 顺序）。${times}\n确定开始吗？`;
+    return `分段接力：本次将运行 ${p.total} 个任务（${p.rounds} 轮 × ${p.segs} 段${p.scenes ? `（${p.scenes} 个场景）` : ""}，按 ${p.scenes ? "轮→场景→段" : "轮→段"} 顺序）。${times}\n确定开始吗？`;
   }
   if (p.kind === "upscale") {
     const how = p.auto ? "逐张自动排队，已放大过的会跳过" : "自动排队关着，只跑这一次";
