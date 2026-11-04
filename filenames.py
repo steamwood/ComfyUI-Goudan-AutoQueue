@@ -41,7 +41,7 @@ def replace_dates(text, now=None):
 
 # 点运行时要换掉 %date:...% 的输入：本节点的「日期」，以及「保存图像（按输出设置）」没连线时直接填的文件名前缀
 # （ComfyUI 前端只替换自带保存节点的 %date%，这里补上；连了线的前缀是列表，不会被改）
-DATE_INPUTS = {NODE_CLASS: DATE_INPUT, "GoudanSaveImage": "filename_prefix"}
+DATE_INPUTS = {NODE_CLASS: DATE_INPUT, "GoudanSaveImage": "filename_prefix", "SaveVideo": "filename_prefix"}  # SaveVideo：分段接力的成片，整批同一个时间
 
 
 def resolve_prompt_dates(prompt, now=None):
