@@ -12,6 +12,7 @@
 只读 Clip Bin 的索引文件（.bin_index.json）来数镜头，不写、不改 ClipStream 的任何东西。"""
 import datetime
 import json
+import math
 import os
 import random
 import re
@@ -29,11 +30,30 @@ TAG = "分段接力"
 
 
 DASH_SEP = re.compile(r"-{3,}")
+# 分段行后面可以带本段秒数：# 3 / #3 / # 3s / # 3秒 / --- 5.5 / ---5.5（整行只能是 分段符 + 数字 + 可选单位）。
+# 带别的文字的 # 行（例如「# 注释」「# 1. 开场」）照旧只是分段线，不读秒数。
+_NUM = r"\s*(\d+(?:\.\d+)?)\s*(?:s|S|sec|秒)?\s*"
+HASH_SEC = re.compile(r"#" + _NUM)
+DASH_SEC = re.compile(r"-{3,}" + _NUM)
+SECONDS_TYPES = ("MiniMaxH3Easy",)
+H3_FPS = 24.0
+H3_MIN_SECONDS, H3_MAX_SECONDS = 0.2, 30.0  # MiniMaxH3Easy 的 seconds 输入范围（nodes.py MIN_SECONDS / MAX_SECONDS）
+CONTEXT_TYPES = ("MiniMaxH3MotionContext",)
+DEFAULT_KEY = "_默认秒数"  # 点运行时记下 MiniMaxH3Easy 原来的秒数（副本从改过的 prompt 拷贝，要靠它回到默认）
 
 
 def is_sep(line):
-    """分段行：和提示词循环一样以 # 开头；或者单独一行 ---（三个以上减号，MiniMaxH3-Easy 提示词优化输出的分段）。"""
-    return line.startswith("#") or bool(DASH_SEP.fullmatch(line.strip()))
+    """分段行：和提示词循环一样以 # 开头；或者单独一行 ---（三个以上减号，MiniMaxH3-Easy 提示词优化输出的分段），后面可带秒数。"""
+    return line.startswith("#") or bool(DASH_SEP.fullmatch(line.strip()) or DASH_SEC.fullmatch(line.strip()))
+
+
+def sep_seconds(line):
+    """分段行上写的秒数；没写（或带的不是纯数字）返回 None。"""
+    if line.startswith("#"):
+        m = HASH_SEC.fullmatch(line)
+    else:
+        m = DASH_SEC.fullmatch(line.strip())
+    return float(m.group(1)) if m else None
 
 
 def _dash_to_hash(text):
@@ -48,6 +68,133 @@ def split_prompts(text):
         return []
     items = aq.split_items(text)
     return ["\n".join(l for l in items[i].split("\n") if not l.startswith("#")).strip() for i in aq.nonempty_index(text)]
+
+
+def split_seconds(text):
+    """和 split_prompts 一一对应：每个非空段的分段行上写的秒数（None = 用 MiniMaxH3Easy 节点上的默认值）。"""
+    out, cur, has = [], None, False
+    for line in str(text or "").split("\n"):
+        if is_sep(line):
+            v = sep_seconds(line)
+            if has:
+                out.append(cur)
+                cur = v
+            elif v is not None:  # 连着几行分段线（例如「# 4」下面再一行「# 镜头1：…」标题）：秒数留给下面的段
+                cur = v
+            has = False
+        elif line.strip():
+            has = True
+    if has:
+        out.append(cur)
+    return out
+
+
+def frames_for(seconds, fps=H3_FPS):
+    """和 MiniMaxH3Easy 的 _frame_length 完全一样：秒数 × fps 取最近的 17×n+5 帧。"""
+    target = max(5.0, float(seconds) * float(fps))
+    return max(0, round((target - 5) / 17)) * 17 + 5
+
+
+def plan_seconds(seconds, default, seg_index, context=22, fps=H3_FPS):
+    """本段实际用的秒数和帧数。返回 (seconds, frames, 是否来自分段行)。不合法就报中文错误。"""
+    own = seconds is not None
+    sec = float(seconds if own else default)
+    label = f"第 {seg_index + 1} 段" + (f"写的 {sec:g} 秒" if own else f"（默认 {sec:g} 秒）")
+    if own and not (H3_MIN_SECONDS <= sec <= H3_MAX_SECONDS):
+        raise RuntimeError(f"[{TAG}] {label}超出 MiniMax H3 允许的范围 {H3_MIN_SECONDS:g}～{H3_MAX_SECONDS:g} 秒，请改分段行上的秒数。")
+    sec = min(H3_MAX_SECONDS, max(H3_MIN_SECONDS, sec))
+    frames = frames_for(sec, fps)
+    if seg_index > 0 and frames - context < 17:
+        lmin = context + 17
+        while lmin % 17 != 5:
+            lmin += 1
+        need = (lmin - 8.5) / fps  # 四舍五入后能落到 lmin 帧的最短秒数
+        raise RuntimeError(
+            f"[{TAG}] {label}太短：H3 一段只能是 17×n+5 帧，{sec:g} 秒 × {fps:g}fps 对齐后是 {frames} 帧，"
+            f"接续段要先放上一段最后 {context} 帧当动作上下文（成片时剪掉），剩下不到 17 帧。接续段至少写 {math.ceil(need * 10) / 10:g} 秒。")
+    return sec, frames, own
+
+
+def _context_frames(prompt):
+    for node in prompt.values():
+        if isinstance(node, dict) and node.get("class_type") in CONTEXT_TYPES:
+            try:
+                return int((node.get("inputs") or {}).get("context_length", 22))
+            except (TypeError, ValueError):
+                pass
+    return 22
+
+
+def apply_seconds(prompt, nid, seg):
+    """把本段秒数写进 MiniMaxH3Easy 的 seconds；没写秒数的段恢复成节点原来的值。返回 [(节点id, 秒, 帧, 是否自定)]。"""
+    inp = prompt[str(nid)]["inputs"]
+    secs = split_seconds(inp.get("分段提示词"))
+    want = secs[seg] if seg < len(secs) else None
+    defaults = inp.setdefault(DEFAULT_KEY, {})
+    ctx = _context_frames(prompt)
+    done = []
+    for tid, node in prompt.items():
+        if not isinstance(node, dict) or node.get("class_type") not in SECONDS_TYPES:
+            continue
+        ni = node.setdefault("inputs", {})
+        if tid not in defaults:
+            if isinstance(ni.get("seconds"), list):
+                continue  # 秒数连了别的节点，不动
+            defaults[tid] = ni.get("seconds", 5.0)
+        try:
+            fps = float(ni.get("fps", H3_FPS))
+        except (TypeError, ValueError):
+            fps = H3_FPS
+        try:
+            sec, frames, own = plan_seconds(want, defaults[tid], seg, ctx if seg > 0 else 0, fps)
+        except RuntimeError as e:  # 不在这里改；节点运行时会报同样的错误
+            print(e)
+            ni["seconds"] = defaults[tid]
+            continue
+        ni["seconds"] = sec if own else defaults[tid]
+        done.append((tid, sec, frames, own, ctx, fps))
+    return done
+
+
+def check_all_seconds(prompt, nid):
+    """点运行后第一个任务开跑时：所有段的秒数都检查一遍，有问题直接报错，一个副本都不排。"""
+    p = json.loads(json.dumps(prompt))
+    msgs = []
+    for k in range(max(1, len(segment_list(p[str(nid)]["inputs"])))):
+        msgs.append(f"第 {k + 1} 段 " + (describe_seconds(_strict_apply(p, nid, k), k) or "（没有 MiniMaxH3Easy）"))
+    return msgs
+
+
+def _strict_apply(prompt, nid, seg):
+    inp = prompt[str(nid)]["inputs"]
+    secs = split_seconds(inp.get("分段提示词"))
+    want = secs[seg] if seg < len(secs) else None
+    defaults = inp.get(DEFAULT_KEY) or {}
+    ctx = _context_frames(prompt) if seg > 0 else 0
+    done = []
+    for tid, node in prompt.items():
+        if isinstance(node, dict) and node.get("class_type") in SECONDS_TYPES:
+            ni = node.get("inputs") or {}
+            d = defaults.get(tid, ni.get("seconds", 5.0))
+            if isinstance(d, list):
+                continue
+            try:
+                fps = float(ni.get("fps", H3_FPS))
+            except (TypeError, ValueError):
+                fps = H3_FPS
+            sec, frames, own = plan_seconds(want, d, seg, ctx, fps)
+            done.append((tid, sec, frames, own, _context_frames(prompt), fps))
+    return done
+
+
+def describe_seconds(done, seg):
+    out = []
+    for tid, sec, frames, own, ctx, fps in done:
+        body = frames - ctx if seg > 0 else frames
+        snap = "" if abs(frames - sec * fps) < 1e-6 else f"（H3 只能 17×n+5 帧，已对齐）"
+        out.append(f"{'本段' if own else '默认'} {sec:g} 秒 → {frames} 帧 ≈ {frames / fps:.2f} 秒{snap}"
+                   + (f"，去掉 {ctx} 帧上下文后成片 {body} 帧 ≈ {body / fps:.2f} 秒" if seg > 0 else ""))
+    return "；".join(out)
 
 
 def legacy_lines(text):
@@ -213,6 +360,9 @@ def configure(prompt, nid):
         pi["mode"] = pick_mode("Force Initial" if seg == 0 else "Auto", opts, pi.get("mode"))
         if not isinstance(pi.get("clip_selection"), list):
             pi["clip_selection"] = "latest"
+    done = apply_seconds(prompt, nid, seg)
+    if any(d[3] for d in done) or seg > 0:
+        print(f"[{TAG}] 第 {seg + 1} 段时长：{describe_seconds(done, seg)}")
     return pickers
 
 
@@ -322,6 +472,7 @@ class GoudanSegmentRelay:
                 "项目基名": ("STRING", {"default": "H3长视频", "tooltip": "每轮的项目名 = 基名_r01_批次时间。连 Picker 和 Saver 的 project_name"}),
                 "分段提示词": ("STRING", {"multiline": True, "default": "#\n第 1 段提示词\n#\n第 2 段提示词",
                                      "tooltip": "和文生图的提示词列表一样：用单独一行 # 分段（也认单独一行 ---；一段可以写多行，空段跳过），段数自动 = 非空段数；"
+                                                "分段行后面写秒数（# 3、--- 5.5、#3秒）= 这一段的时长，覆盖 MiniMaxH3Easy 的 seconds，不写就用节点上的值；"
                                                 "{a|b|c} 或 __列表名__ 随机（需要 Impact Pack）"}),
             },
             "optional": {
@@ -356,6 +507,10 @@ class GoudanSegmentRelay:
         total = n * 轮数
         batch = 批次 or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         r, s = 序号 // n, 序号 % n
+        if 序号 == 0 and prompt and str(unique_id) in prompt:
+            plan = check_all_seconds(prompt, unique_id)  # 秒数不合法在这里报错，后面的段不排
+            if any(x is not None for x in split_seconds(分段提示词)):
+                print(f"[{TAG}] 各段时长：" + " | ".join(plan))
         proj = project_name(项目基名, r + 1, batch)
         if 自动排队 and 序号 == 0 and total > 1 and prompt:
             fp = aq.fingerprint(prompt, extra_pnginfo, unique_id, ("序号", "自动排队", "批次"))
