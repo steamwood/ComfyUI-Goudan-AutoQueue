@@ -3,6 +3,7 @@ from . import browse  # noqa: F401  注册 /goudan/browse（选择文件夹/图�
 from .dirio import SeedVR2DirLoad, SeedVR2DirSave
 from .autoqueue import PromptCycleAutoQueue
 from .segrelay import GoudanSegmentRelay
+from .h3anchor import GoudanH3SceneAnchor
 from .filenames import PromptCycleFilenames
 from .scaling import GoudanScaleSettings, GoudanScalePrepare, GoudanScaleFinish
 from .saving import GoudanOutputSettings, GoudanSaveImage
@@ -13,6 +14,7 @@ NODE_CLASS_MAPPINGS = {
     "PromptCycleAutoQueue": PromptCycleAutoQueue,
     "PromptCycleFilenames": PromptCycleFilenames,
     "GoudanSegmentRelay": GoudanSegmentRelay,
+    "GoudanH3SceneAnchor": GoudanH3SceneAnchor,
     "GoudanScaleSettings": GoudanScaleSettings,
     "GoudanScalePrepare": GoudanScalePrepare,
     "GoudanScaleFinish": GoudanScaleFinish,
@@ -25,6 +27,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PromptCycleAutoQueue": "提示词循环（自动计条数 + 自动排队）",
     "PromptCycleFilenames": "文件名/文件夹（自动）",
     "GoudanSegmentRelay": "分段接力排队（MiniMax H3 长视频）",
+    "GoudanH3SceneAnchor": "场景锚定（颜色/亮度拉回场景第 1 段）",
     "GoudanScaleSettings": "缩放设置",
     "GoudanScalePrepare": "SeedVR2 前缩放（按缩放设置）",
     "GoudanScaleFinish": "最终尺寸（精确缩放 / 缩小可跳过SeedVR2）",

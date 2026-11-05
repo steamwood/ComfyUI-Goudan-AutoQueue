@@ -344,6 +344,19 @@ def project_name(base, r, stamp, scene=None):
     return f"{(base or 'H3').strip()}_{sc}_r{r:02d}_{stamp}"
 
 
+def video_prefix(batch, proj, scene_segments, now=None, root="video", tag="H3"):
+    """最终成片 SaveVideo 的 filename_prefix：
+    - 日期文件夹 = 点运行时的日期（批次时间戳前 8 位），同一批次所有任务都一样，跨过午夜也不变；
+    - 一个场景（没有 ## 时就是整条）有多段：放进 video/日期/项目名/（项目名 = 基名[_场景名]_rNN_批次，和 Clip Bin 项目一一对应）；
+    - 只有一段：直接放 video/日期/；
+    - 文件名照旧 H3-本段开跑时间，ComfyUI 再加 _00001_ 序号。"""
+    b = str(batch or "")
+    day = b[:8] if re.fullmatch(r"\d{8}", b[:8] or "") else (now or datetime.datetime.now()).strftime("%Y%m%d")
+    stamp = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
+    sub = f"{proj}/" if scene_segments > 1 else ""
+    return f"{root}/{day}/{sub}{tag}-{stamp}"
+
+
 def _output_dir():
     try:
         import folder_paths
@@ -558,10 +571,11 @@ class GoudanSegmentRelay:
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"},
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "INT", "INT", "INT")
-    RETURN_NAMES = ("项目名", "本段提示词", "序号", "段", "轮")
+    RETURN_TYPES = ("STRING", "STRING", "INT", "INT", "INT", "STRING")
+    RETURN_NAMES = ("项目名", "本段提示词", "序号", "段", "轮", "视频前缀")
     OUTPUT_TOOLTIPS = ("连 Clip Bin Picker 和 Saver 的 project_name", "连 MiniMaxH3Easy 的 prompt 和 Saver 的 prompt（已加触发词、已展开随机变量）",
-                       "第几个任务（0 起）", "第几段（1 起）", "第几轮（1 起）")
+                       "第几个任务（0 起）", "第几段（1 起）", "第几轮（1 起）",
+                       "连最终成片 SaveVideo 的 filename_prefix：video/点运行时的日期/项目名/H3-时间（同一批次跨天也在同一个日期文件夹；只有一段的放 video/日期/）")
     FUNCTION = "run"
     CATEGORY = "狗蛋工具"
 
@@ -600,7 +614,7 @@ class GoudanSegmentRelay:
             fp = aq.fingerprint(prompt, extra_pnginfo, unique_id, ("序号", "自动排队", "批次"))
             if aq.is_duplicate(fp, extra_pnginfo):
                 print(f"[{TAG}] 队列里已经有一套内容完全相同的任务（重复点了运行），这次整次跳过。")
-                return aq.blocked_outputs(5)
+                return aq.blocked_outputs(6)
             if not aq._first_auto_node(prompt, unique_id):
                 print(f"[{TAG}] 图里有多个开着「自动排队」的节点，只由 id 最小的那个负责排队，这个不排。")
             else:
@@ -626,4 +640,4 @@ class GoudanSegmentRelay:
         text = expand_random(segs[s], random.Random(f"{batch}|{序号}").randint(0, 2**32 - 1))
         print(f"[{TAG}] 第 {r + 1}/{轮数} 轮 " + (f"场景 {si + 1}/{sn}「{sname}」第 {loc + 1}/{sc_len} 段" if sname is not None else f"第 {s + 1}/{n} 段")
               + f"，项目 {proj}：{text[:60]}")
-        return (proj, text, 序号, s + 1, r + 1)
+        return (proj, text, 序号, s + 1, r + 1, video_prefix(batch, proj, sc_len))
