@@ -147,7 +147,7 @@ def pending_copies(fp):
         return 0
 
 
-AUTO_NODES = {"PromptCycleAutoQueue": ("序号", "自动排队"), "SeedVR2DirLoad": ("自动排队",), "GoudanSegmentRelay": ("序号", "自动排队", "批次")}
+AUTO_NODES = {"PromptCycleAutoQueue": ("序号", "自动排队"), "SeedVR2DirLoad": ("自动排队",), "GoudanSegmentRelay": ("序号", "自动排队", "批次"), "GoudanVideoDirLoad": ("自动排队",)}
 DUP_KEY = "goudan_autoqueue_dup"
 
 
