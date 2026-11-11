@@ -31,7 +31,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SeedVR2DirSave": "SeedVR2 保存到原目录/SeedVR2",
     "PromptCycleAutoQueue": "提示词循环（自动计条数 + 自动排队）",
     "PromptCycleFilenames": "文件名/文件夹（自动）",
-    "GoudanSegmentRelay": "分段接力排队（MiniMax H3 长视频）",
+    "GoudanSegmentRelay": "分段批量排队（每段一个任务）",
     "GoudanH3SceneAnchor": "场景锚定（颜色/对比/细节拉回场景第 1 段）",
     "GoudanScaleSettings": "缩放设置",
     "GoudanScalePrepare": "SeedVR2 前缩放（按缩放设置）",

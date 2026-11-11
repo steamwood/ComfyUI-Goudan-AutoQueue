@@ -145,7 +145,7 @@ async function plannedRuns() {
 function confirmText(p, batch) {
   const times = batch > 1 ? `\n（批量次数 ${batch}：上面的整套会跑 ${batch} 遍，共 ${p.total * batch} 次）` : "";
   if (p.kind === "relay") {
-    return `分段接力：本次将运行 ${p.total} 个任务（${p.rounds} 轮 × ${p.segs} 段${p.scenes ? `（${p.scenes} 个场景）` : ""}，按 ${p.scenes ? "轮→场景→段" : "轮→段"} 顺序）。${times}\n确定开始吗？`;
+    return `分段批量排队：本次将运行 ${p.total} 个任务（${p.rounds} 轮 × ${p.segs} 段${p.scenes ? `（${p.scenes} 个场景）` : ""}，按 ${p.scenes ? "轮→场景→段" : "轮→段"} 顺序）。${times}\n确定开始吗？`;
   }
   if (p.kind === "upscale") {
     const how = p.auto ? "逐张自动排队，已放大过的会跳过" : "自动排队关着，只跑这一次";

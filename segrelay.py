@@ -31,7 +31,7 @@ BIN_DIRS = ("h3-clipstream", "minimax_h3_bins")  # 新版 / 老版 ClipStream �
 # 老版选项是「后续自动接力」，新版是「后续自动接续」，都按开头的英文匹配
 MODE_DEFAULTS = {"Force Initial": "Force Initial (强制新建首段，无上下文)", "Auto": "Auto (首段全新 / 后续自动接续)"}
 SEED_MODES = ("每轮随机（同一轮各段同种子）", "每轮递增（同一轮各段同种子）", "不改种子")  # 名字沿用；接续段的种子见 seg_seed
-TAG = "分段接力"
+TAG = "分段批量排队"
 
 
 DASH_SEP = re.compile(r"-{3,}")
@@ -598,10 +598,10 @@ class GoudanSegmentRelay:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "轮数": ("INT", {"default": 1, "min": 1, "max": 1000, "tooltip": "整条长视频做几遍（每遍一个新项目）。总任务数 = 段数 × 轮数，自动排队。"}),
+                "轮数": ("INT", {"default": 1, "min": 1, "max": 1000, "tooltip": "整组分段跑几遍（每遍一个新项目名）。总任务数 = 段数 × 轮数，自动排队。"}),
                 "自动排队": ("BOOLEAN", {"default": True}),
                 "序号": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1, "tooltip": "自动管理，保持 0 即可"}),
-                "项目基名": ("STRING", {"default": "H3长视频", "tooltip": "每轮的项目名 = 基名_r01_批次时间。连 Picker 和 Saver 的 project_name"}),
+                "项目基名": ("STRING", {"default": "H3批量", "tooltip": "每轮的项目名 = 基名_r01_批次时间，也用作成片文件夹名（见「视频前缀」）"}),
                 "分段提示词": ("STRING", {"multiline": True, "default": "#\n第 1 段提示词\n#\n第 2 段提示词",
                                      "tooltip": "和文生图的提示词列表一样：用单独一行 # 分段（也认单独一行 ---；一段可以写多行，空段跳过），段数自动 = 非空段数；"
                                                 "分段行后面写秒数 = 这一段的时长（# 4、#4、# 4s、# 4秒、# 4.5、# 6sec、--- 5.5 都行），从「本段秒数」输出，"
@@ -612,7 +612,7 @@ class GoudanSegmentRelay:
                                                 "{a|b|c} 或 __列表名__ 随机（需要 Impact Pack）"}),
             },
             "optional": {
-                "每轮随机种子": ("BOOLEAN", {"default": True, "tooltip": "开着时每一轮换新的随机种子（rgthree Seed 和采样器种子都会换）；关着时用工作流里的种子。不管开关，接续段（第 2 段起）都会在本轮种子上按段号派生出各自不同的种子（可复现），避免每段同一噪声叠加导致越接越糊"}),
+                "每轮随机种子": ("BOOLEAN", {"default": True, "tooltip": "开着时每一轮换新的随机种子（rgthree Seed 和采样器种子都会换）；关着时用工作流里的种子。不管开关，第 2 段起都会在本轮种子上按段号派生出各自不同的种子（可复现），每段各用各的种子"}),
                 "全局触发词": ("STRING", {"default": "", "tooltip": "可空。填了会自动加在每一段提示词最前面（例如 LoRA 触发词），在随机变量展开之前加，空着就什么都不加"}),
                 "批次": ("STRING", {"default": "", "tooltip": "自动管理（点运行时填成时间戳），保持空着即可"}),
                 "默认秒数": ("FLOAT", {"default": GENERIC_DEFAULT_SECONDS, "min": 0.0, "max": 100000.0, "step": 0.1,
@@ -685,7 +685,7 @@ class GoudanSegmentRelay:
                 def gen():
                     for k in range(1, total):
                         p = aq.make_copy(prompt, extra_pnginfo, k, unique_id, {"序号": k, "自动排队": False, "批次": batch}, rules={})
-                        yield round_seed_copy(p, dict(rules), k // n, seed_mode, round_seeds, _local(inp["分段提示词"], k % n, prompt))
+                        yield round_seed_copy(p, dict(rules), k // n, seed_mode, round_seeds, (k % n) if not chain else _local(inp["分段提示词"], k % n))
                 aq.queue_copies(gen(), extra_pnginfo, TAG, fp, prompt, total=total - 1)
                 print(f"[{TAG}] 共 {n} 段{f'（{sn} 个场景）' if sname is not None else ''} × {轮数} 轮 = {total} 个任务，"
                       f"已把剩下 {total - 1} 个按 {'轮→场景→段' if sname is not None else '轮→段'} 顺序排进队列")
