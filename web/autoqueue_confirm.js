@@ -3,12 +3,13 @@
 // 改为看正在用的「SeedVR2 读图」节点：单张图片不弹框，文件夹提示逐张处理。
 import { app } from "../../scripts/app.js";
 
+const nfkc = (l) => String(l).normalize("NFKC");
 const IMAGE_EXT = /\.(png|jpe?g|webp|bmp|tiff?|gif)$/i;
 
 function countSegments(text, dash = false) {
   let n = 0, cur = false;
   for (const line of String(text || "").split("\n")) {
-    if (line.startsWith("#") || (dash && /^-{3,}(\s*\d+(\.\d+)?\s*(s|S|sec|秒)?\s*)?$/.test(line.trim()))) { if (cur) n++; cur = false; }
+    if (line.startsWith("#") || (dash && /^-{3,}(\s*(\d+(\.\d*)?|\.\d+)\s*(s|secs?|seconds?|秒钟?)?\s*)?$/i.test(nfkc(line).trim()))) { if (cur) n++; cur = false; }
     else if (line.trim()) cur = true;
   }
   if (cur) n++;
@@ -21,7 +22,7 @@ function countScenes(text) {
   const isScene = (l) => l.startsWith("##") && !l.startsWith("###");
   if (!lines.some(isScene)) return 0;
   let n = 0, cur = [];
-  const flush = () => { if (cur.some((l) => l.trim() && !l.startsWith("#") && !/^-{3,}(\s*\d+(\.\d+)?\s*(s|S|sec|秒)?\s*)?$/.test(l.trim()))) n++; cur = []; };
+  const flush = () => { if (cur.some((l) => l.trim() && !l.startsWith("#") && !/^-{3,}(\s*(\d+(\.\d*)?|\.\d+)\s*(s|secs?|seconds?|秒钟?)?\s*)?$/i.test(nfkc(l).trim()))) n++; cur = []; };
   for (const l of lines) { if (isScene(l)) flush(); else cur.push(l); }
   flush();
   return n;

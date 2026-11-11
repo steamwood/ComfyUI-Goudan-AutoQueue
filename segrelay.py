@@ -11,6 +11,8 @@
   不会悄悄地接错段或跳段。
 - 多场景：单独一行 ## 场景名 开一个新场景。每个场景是单独的一条接力（项目名 基名_场景名_r01_时间戳，场景第 1 段 Force Initial），
   每轮按 场景A 全部段 → 场景B 全部段 的顺序；同一轮所有场景同一个种子；某段核对失败只撤这个场景本轮后面的段。没有 ## 和以前完全一样。
+- H3 视频批量排队（1.3.0）：工作流里没有 ClipStream 的读取 / 保存片段节点时，每段就是一个独立任务，按顺序排队，不核对镜头数；
+  「本段秒数」输出 = 分段行上写的秒数（没写 = 「默认秒数」输入），连到工作流里任意时长输入，只检查大于 0。
 只读 Clip Bin 的索引文件（.bin_index.json）来数镜头，不写、不改 ClipStream 的任何东西。"""
 import datetime
 import json
@@ -18,6 +20,7 @@ import math
 import os
 import random
 import re
+import unicodedata
 import uuid
 
 from . import autoqueue as aq
@@ -32,11 +35,14 @@ TAG = "分段接力"
 
 
 DASH_SEP = re.compile(r"-{3,}")
-# 分段行后面可以带本段秒数：# 3 / #3 / # 3s / # 3秒 / --- 5.5 / ---5.5（整行只能是 分段符 + 数字 + 可选单位）。
-# 带别的文字的 # 行（例如「# 注释」「# 1. 开场」）照旧只是分段线，不读秒数。
-_NUM = r"\s*(\d+(?:\.\d+)?)\s*(?:s|S|sec|秒)?\s*"
-HASH_SEC = re.compile(r"#" + _NUM)
-DASH_SEC = re.compile(r"-{3,}" + _NUM)
+# 分段行后面可以带本段秒数（整行只能是 分段符 + 数字 + 可选单位，单位不分大小写、前面可以有空格）：
+#   # 4 / #4 / # 4s / # 4 s / # 4秒 / # 4.5 / # .5 / # 6sec / # 6secs / # 6second(s) / # 6.5S / # 4 秒钟 / --- 5.5 / ---5.5
+#   全角数字、全角小数点（# ４．５秒）也认。
+# 带别的文字的 # 行（例如「# 注释」「# 1. 开场」「# 3个人」）照旧只是分段线，不读秒数。
+_NUM = r"\s*(\d+(?:\.\d*)?|\.\d+)\s*(?:s|secs?|seconds?|秒钟?)?\s*"
+HASH_SEC = re.compile(r"#" + _NUM, re.IGNORECASE)
+DASH_SEC = re.compile(r"-{3,}" + _NUM, re.IGNORECASE)
+GENERIC_DEFAULT_SECONDS = 5.0  # 「默认秒数」没连、也没改时的值
 SECONDS_TYPES = ("MiniMaxH3Easy",)
 H3_FPS = 24.0
 H3_MIN_SECONDS, H3_MAX_SECONDS = 0.2, 30.0  # MiniMaxH3Easy 的 seconds 输入范围（nodes.py MIN_SECONDS / MAX_SECONDS）
@@ -44,17 +50,22 @@ CONTEXT_TYPES = ("MiniMaxH3MotionContext",)
 DEFAULT_KEY = "_默认秒数"  # 点运行时记下 MiniMaxH3Easy 原来的秒数（副本从改过的 prompt 拷贝，要靠它回到默认）
 
 
+def _norm(line):
+    """全角数字 / 全角小数点 / 全角空格 → 半角（只用于读秒数，分段规则不变）。"""
+    return unicodedata.normalize("NFKC", line)
+
+
 def is_sep(line):
     """分段行：和提示词循环一样以 # 开头；或者单独一行 ---（三个以上减号，MiniMaxH3-Easy 提示词优化输出的分段），后面可带秒数。"""
-    return line.startswith("#") or bool(DASH_SEP.fullmatch(line.strip()) or DASH_SEC.fullmatch(line.strip()))
+    return line.startswith("#") or bool(DASH_SEP.fullmatch(line.strip()) or DASH_SEC.fullmatch(_norm(line).strip()))
 
 
 def sep_seconds(line):
     """分段行上写的秒数；没写（或带的不是纯数字）返回 None。"""
     if line.startswith("#"):
-        m = HASH_SEC.fullmatch(line)
+        m = HASH_SEC.fullmatch(_norm(line).rstrip())
     else:
-        m = DASH_SEC.fullmatch(line.strip())
+        m = DASH_SEC.fullmatch(_norm(line).strip())
     return float(m.group(1)) if m else None
 
 
@@ -136,6 +147,38 @@ def _split_seconds_one(text):
     return out
 
 
+def segment_seconds(text, seg, default):
+    """「本段秒数」输出（通用，接任意时长输入）：第 seg 段（0 起）分段行上写了秒数就用写的，没写就用「默认秒数」。"""
+    secs = split_seconds(text)
+    v = secs[seg] if 0 <= seg < len(secs) else None
+    return float(default if v is None else v)
+
+
+def check_generic_seconds(text, default):
+    """点运行后、排副本之前：每段的秒数必须是大于 0 的数（只做这一项检查，对齐交给工作流自己的公式）。返回 [每段秒数]，不合法报中文错误。"""
+    out, bad = [], []
+    for k, v in enumerate(split_seconds(text)):
+        own = v is not None
+        try:
+            sec = float(v if own else default)
+        except (TypeError, ValueError):
+            sec = float("nan")
+        if not (sec > 0 and math.isfinite(sec)):
+            bad.append(f"第 {k + 1} 段" + (f"写的 {v:g} 秒" if own else f"（没写秒数，用默认秒数 {default}）"))
+        out.append(sec)
+    if bad:
+        raise RuntimeError(f"[{TAG}] 时长必须大于 0 秒：" + "；".join(bad) + "。请改分段行上的秒数或「默认秒数」，这次一个任务都没排。")
+    return out
+
+
+def uses_clipbin(prompt):
+    """工作流里有没有 ClipStream 的读取 / 保存片段节点。没有 = 每段独立出片（批量排队），不按段数核对项目里的镜头。
+    prompt 拿不到时按有算（和以前一样）。"""
+    if not isinstance(prompt, dict):
+        return True
+    return any(isinstance(n, dict) and n.get("class_type") in PICKER_TYPES + SAVER_TYPES for n in prompt.values())
+
+
 def frames_for(seconds, fps=H3_FPS):
     """和 MiniMaxH3Easy 的 _frame_length 完全一样：秒数 × fps 取最近的 17×n+5 帧。"""
     target = max(5.0, float(seconds) * float(fps))
@@ -172,7 +215,10 @@ def _context_frames(prompt):
     return 22
 
 
-def _local(text, seg):
+def _local(text, seg, prompt=None):
+    """场景内第几段（0 起）。给了 prompt 且里面没有 ClipStream 节点（每段独立出片）时一律算 0：不接上一段，不需要上下文帧。"""
+    if prompt is not None and not uses_clipbin(prompt):
+        return 0
     plan = scene_plan(text)
     return plan[seg][2] if seg < len(plan) else seg
 
@@ -182,7 +228,7 @@ def apply_seconds(prompt, nid, seg):
     inp = prompt[str(nid)]["inputs"]
     secs = split_seconds(inp.get("分段提示词"))
     want = secs[seg] if seg < len(secs) else None
-    loc = _local(inp.get("分段提示词"), seg)
+    loc = _local(inp.get("分段提示词"), seg, prompt)
     defaults = inp.setdefault(DEFAULT_KEY, {})
     ctx = _context_frames(prompt)
     done = []
@@ -214,7 +260,7 @@ def check_all_seconds(prompt, nid):
     p = json.loads(json.dumps(prompt))
     msgs = []
     for k in range(max(1, len(segment_list(p[str(nid)]["inputs"])))):
-        loc = _local(p[str(nid)]["inputs"].get("分段提示词"), k)
+        loc = _local(p[str(nid)]["inputs"].get("分段提示词"), k, p)
         msgs.append(f"第 {k + 1} 段 " + (describe_seconds(_strict_apply(p, nid, k), loc) or "（没有 MiniMaxH3Easy）"))
     return msgs
 
@@ -223,7 +269,7 @@ def _strict_apply(prompt, nid, seg):
     inp = prompt[str(nid)]["inputs"]
     secs = split_seconds(inp.get("分段提示词"))
     want = secs[seg] if seg < len(secs) else None
-    loc = _local(inp.get("分段提示词"), seg)
+    loc = _local(inp.get("分段提示词"), seg, prompt)
     defaults = inp.get(DEFAULT_KEY) or {}
     ctx = _context_frames(prompt) if loc > 0 else 0
     done = []
@@ -425,7 +471,7 @@ def configure(prompt, nid):
     n = max(1, len(segs))
     k = inp.get("序号") if isinstance(inp.get("序号"), int) else 0
     seg = k % n
-    loc = _local(inp.get("分段提示词"), seg)
+    loc = _local(inp.get("分段提示词"), seg, prompt)
     pickers = {t for t, _ in linked_from(prompt, nid, 0) if prompt[t].get("class_type") in PICKER_TYPES}
     for t in pickers:
         pi = prompt[t]["inputs"]
@@ -558,7 +604,9 @@ class GoudanSegmentRelay:
                 "项目基名": ("STRING", {"default": "H3长视频", "tooltip": "每轮的项目名 = 基名_r01_批次时间。连 Picker 和 Saver 的 project_name"}),
                 "分段提示词": ("STRING", {"multiline": True, "default": "#\n第 1 段提示词\n#\n第 2 段提示词",
                                      "tooltip": "和文生图的提示词列表一样：用单独一行 # 分段（也认单独一行 ---；一段可以写多行，空段跳过），段数自动 = 非空段数；"
-                                                "分段行后面写秒数（# 3、--- 5.5、#3秒）= 这一段的时长，覆盖 MiniMaxH3Easy 的 seconds，不写就用节点上的值；"
+                                                "分段行后面写秒数 = 这一段的时长（# 4、#4、# 4s、# 4秒、# 4.5、# 6sec、--- 5.5 都行），从「本段秒数」输出，"
+                                                "也会自动写进 MiniMaxH3Easy 的 seconds；不写就用「默认秒数」（MiniMaxH3Easy 用节点上的值）；"
+                                                "H3 视频批量排队：每段一个任务，例如「# 4 换行 提示词 换行 # 5 换行 提示词」；"
                                                 "单独一行 ## 场景名 = 新场景（多场景）：每个场景单独一条接力（自己的项目 基名_场景名_r01_时间，第 1 段 Force Initial，不接上一个场景），"
                                                 "每轮按场景顺序跑；## 后面不写名字就叫 场景1、场景2…；「## 3」是名叫 3 的场景，不是秒数；不写 ## 和以前完全一样；"
                                                 "{a|b|c} 或 __列表名__ 随机（需要 Impact Pack）"}),
@@ -567,15 +615,20 @@ class GoudanSegmentRelay:
                 "每轮随机种子": ("BOOLEAN", {"default": True, "tooltip": "开着时每一轮换新的随机种子（rgthree Seed 和采样器种子都会换）；关着时用工作流里的种子。不管开关，接续段（第 2 段起）都会在本轮种子上按段号派生出各自不同的种子（可复现），避免每段同一噪声叠加导致越接越糊"}),
                 "全局触发词": ("STRING", {"default": "", "tooltip": "可空。填了会自动加在每一段提示词最前面（例如 LoRA 触发词），在随机变量展开之前加，空着就什么都不加"}),
                 "批次": ("STRING", {"default": "", "tooltip": "自动管理（点运行时填成时间戳），保持空着即可"}),
+                "默认秒数": ("FLOAT", {"default": GENERIC_DEFAULT_SECONDS, "min": 0.0, "max": 100000.0, "step": 0.1,
+                                   "tooltip": "分段行上没写秒数的段用这个时长。可以把工作流原来的时长节点（例如「视频时长（秒）」）连到这里，"
+                                              "再把「本段秒数」输出连到原来时长连去的地方"}),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"},
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "INT", "INT", "INT", "STRING")
-    RETURN_NAMES = ("项目名", "本段提示词", "序号", "段", "轮", "视频前缀")
+    RETURN_TYPES = ("STRING", "STRING", "INT", "INT", "INT", "STRING", "FLOAT")
+    RETURN_NAMES = ("项目名", "本段提示词", "序号", "段", "轮", "视频前缀", "本段秒数")
     OUTPUT_TOOLTIPS = ("连 Clip Bin Picker 和 Saver 的 project_name", "连 MiniMaxH3Easy 的 prompt 和 Saver 的 prompt（已加触发词、已展开随机变量）",
                        "第几个任务（0 起）", "第几段（1 起）", "第几轮（1 起）",
-                       "连最终成片 SaveVideo 的 filename_prefix：video/点运行时的日期/项目名/H3-时间（同一批次跨天也在同一个日期文件夹；只有一段的放 video/日期/）")
+                       "连最终成片 SaveVideo 的 filename_prefix：video/点运行时的日期/项目名/H3-时间（同一批次跨天也在同一个日期文件夹；只有一段的放 video/日期/）",
+                       "这一段的时长（秒）：分段行上写了就用写的，没写就是「默认秒数」。连到工作流里任意时长输入"
+                       "（例如原来「视频时长（秒）」连去的数学表达式 / 子图入口 / 视频节点的秒数），每个排队任务各自用自己那段的秒数")
     FUNCTION = "run"
     CATEGORY = "狗蛋工具"
 
@@ -583,7 +636,7 @@ class GoudanSegmentRelay:
     def IS_CHANGED(cls, **kw):
         return uuid.uuid4().hex
 
-    def run(self, 轮数, 自动排队, 序号, 项目基名, 分段提示词, 每轮随机种子=True, 全局触发词="", 批次="",
+    def run(self, 轮数, 自动排队, 序号, 项目基名, 分段提示词, 每轮随机种子=True, 全局触发词="", 批次="", 默认秒数=GENERIC_DEFAULT_SECONDS,
             prompt=None, extra_pnginfo=None, unique_id=None, **_ignored):
         inp = {"分段提示词": 分段提示词}
         if 全局触发词 and 全局触发词.strip():  # 直接调用（没经过点运行处理）时也加上
@@ -601,9 +654,17 @@ class GoudanSegmentRelay:
         scenes = split_scenes(inp["分段提示词"])
         sn = len(scenes)
         sc_len = sum(1 for x in plan if x[0] == si)
+        chain = uses_clipbin(prompt)  # 没有 ClipStream 节点 = 每段独立出片（H3 视频批量排队）
+        if 默认秒数 is None:
+            默认秒数 = GENERIC_DEFAULT_SECONDS
+        if 序号 == 0:
+            gsecs = check_generic_seconds(inp["分段提示词"], 默认秒数)  # 秒数不合法在这里报错，一个副本都不排
+            if any(x is not None for x in split_seconds(分段提示词)):
+                print(f"[{TAG}] 各段时长（本段秒数）：" + "、".join(f"{x:g}" for x in gsecs) + " 秒")
         if 序号 == 0 and prompt and str(unique_id) in prompt:
             sp = check_all_seconds(prompt, unique_id)  # 秒数不合法在这里报错，后面的段不排
-            if any(x is not None for x in split_seconds(分段提示词)):
+            if any(x is not None for x in split_seconds(分段提示词)) and any(
+                    isinstance(v, dict) and v.get("class_type") in SECONDS_TYPES for v in prompt.values()):
                 print(f"[{TAG}] 各段时长：" + " | ".join(sp))
             if sname is not None:
                 print(f"[{TAG}] 共 {sn} 个场景：" + "，".join(f"「{nm}」{sum(1 for x in plan if x[0] == i)} 段" for i, (nm, _b) in enumerate(scenes))
@@ -614,7 +675,7 @@ class GoudanSegmentRelay:
             fp = aq.fingerprint(prompt, extra_pnginfo, unique_id, ("序号", "自动排队", "批次"))
             if aq.is_duplicate(fp, extra_pnginfo):
                 print(f"[{TAG}] 队列里已经有一套内容完全相同的任务（重复点了运行），这次整次跳过。")
-                return aq.blocked_outputs(6)
+                return aq.blocked_outputs(7)
             if not aq._first_auto_node(prompt, unique_id):
                 print(f"[{TAG}] 图里有多个开着「自动排队」的节点，只由 id 最小的那个负责排队，这个不排。")
             else:
@@ -624,11 +685,11 @@ class GoudanSegmentRelay:
                 def gen():
                     for k in range(1, total):
                         p = aq.make_copy(prompt, extra_pnginfo, k, unique_id, {"序号": k, "自动排队": False, "批次": batch}, rules={})
-                        yield round_seed_copy(p, dict(rules), k // n, seed_mode, round_seeds, _local(inp["分段提示词"], k % n))
+                        yield round_seed_copy(p, dict(rules), k // n, seed_mode, round_seeds, _local(inp["分段提示词"], k % n, prompt))
                 aq.queue_copies(gen(), extra_pnginfo, TAG, fp, prompt, total=total - 1)
                 print(f"[{TAG}] 共 {n} 段{f'（{sn} 个场景）' if sname is not None else ''} × {轮数} 轮 = {total} 个任务，"
                       f"已把剩下 {total - 1} 个按 {'轮→场景→段' if sname is not None else '轮→段'} 顺序排进队列")
-        have = clip_count(proj)
+        have = clip_count(proj) if chain else loc
         where = f"场景「{sname}」第 {loc + 1}/{sc_len} 段" if sname is not None else f"第 {s + 1} 段"
         if have != loc:
             left = _cancel_round(batch, r, unique_id, si if sname is not None else None)
@@ -640,4 +701,6 @@ class GoudanSegmentRelay:
         text = expand_random(segs[s], random.Random(f"{batch}|{序号}").randint(0, 2**32 - 1))
         print(f"[{TAG}] 第 {r + 1}/{轮数} 轮 " + (f"场景 {si + 1}/{sn}「{sname}」第 {loc + 1}/{sc_len} 段" if sname is not None else f"第 {s + 1}/{n} 段")
               + f"，项目 {proj}：{text[:60]}")
-        return (proj, text, 序号, s + 1, r + 1, video_prefix(batch, proj, sc_len))
+        sec = segment_seconds(inp["分段提示词"], s, 默认秒数)
+        print(f"[{TAG}] 本段秒数 {sec:g}")
+        return (proj, text, 序号, s + 1, r + 1, video_prefix(batch, proj, sc_len), sec)
